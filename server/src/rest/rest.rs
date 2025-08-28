@@ -1,14 +1,13 @@
-use axum::{routing, Router};
 use log;
+use axum::{routing, Router };
 
-#[tokio::main]
 pub async fn start() {
     log::info!("starting web api");
 
     let app = Router::new().route("/", routing::get(hello));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8222").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app).await.unwrap()
 }
 
 async fn hello() -> &'static str {
