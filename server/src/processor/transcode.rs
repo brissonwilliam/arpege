@@ -31,7 +31,7 @@ pub fn transcode(path: &str) -> Result<(), std::io::Error> {
     ]
     .to_vec();
 
-    log::info!("invoking 'ffmpeg {}'", args.join(" "));
+    log::info!("transcoding {} | invoking 'ffmpeg {}'", path, args.join(" "));
 
     let cmd = match std::process::Command::new("ffmpeg")
         .args(args)
