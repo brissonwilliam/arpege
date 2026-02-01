@@ -27,7 +27,7 @@ pub fn transcode(path: &str) -> Result<(), std::io::Error> {
         kbs.as_str(),
         "-movflags",
         "+faststart",
-        "data/fs/out_%03d.m4a", // todo: smarter split, write into uuid given by db
+        "data/fs/transcodes/out_%03d.m4a", // todo: smarter split, write into uuid given by db
     ]
     .to_vec();
 

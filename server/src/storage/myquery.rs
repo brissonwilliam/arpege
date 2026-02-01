@@ -3,8 +3,8 @@ pub static CREATE_DB_QUERIES: &[&'static str] = &[
         CREATE TABLE IF NOT EXISTS song (
             id BLOB(16) PRIMARY KEY,
             created DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            name VARCHAR(256) NOT NULL,
-            duration INTEGER NOT NULL,
+            title VARCHAR(1024) NOT NULL,
+            duration_ms INTEGER NOT NULL,
             artist_id BLOB(16),
             album_id BLOB(16),
             track_number INT8
