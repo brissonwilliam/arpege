@@ -1,4 +1,7 @@
-use std::{char, str::FromStr};
+use std::time::Duration;
+
+use crate::storage::storage;
+use sqlx::{Execute, FromRow, QueryBuilder, Sqlite};
 
 pub fn normalize_str(s: &str) -> String {
     let mut norm = String::from(s);
@@ -54,7 +57,7 @@ pub fn tokenize(s: String) -> Vec<String> {
 
 pub struct PruneDuplicataCriteria {
     title_tokens: Vec<String>,
-    duartion_ms: Option<u32>,
+    duration_ms: Option<u32>,
     artist_tokens: Vec<String>,
 }
 
@@ -72,8 +75,51 @@ impl PruneDuplicataCriteria {
 
         return PruneDuplicataCriteria {
             title_tokens,
-            duartion_ms: duration_ms,
+            duration_ms,
             artist_tokens: artist_tokens,
         };
+    }
+}
+
+#[derive(Debug, FromRow)]
+pub struct Duplicata {}
+
+impl storage::Storage {
+    pub async fn get_duplicates(
+        &self,
+        criteria: PruneDuplicataCriteria,
+    ) -> Result<Vec<Duplicata>, sqlx::Error> {
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+            r#"
+            SELECT id FROM song 
+            WHERE id IN (SELECT song_id FROM song_token WHERE token IN (
+        "#,
+        );
+        let mut qsep = qb.separated(",");
+        for t in criteria.title_tokens.iter() {
+            qsep.push_bind(t.as_str());
+        }
+        qsep.push_unseparated("))");
+
+        if let Some(duration_ms) = criteria.duration_ms {
+            qb.push(" AND duration_ms BETWEEN ");
+            let delta_duration = 3000;
+            qb.push_bind(duration_ms - delta_duration);
+            qb.push(" AND ");
+            qb.push_bind(duration_ms + delta_duration);
+        }
+
+        if criteria.artist_tokens.len() > 0 {
+            qb.push(" AND artist_id IN ( ");
+            let mut qsep = qb.separated(",");
+            for at in criteria.artist_tokens.iter() {
+                qsep.push_bind(at.as_str());
+            }
+            qsep.push_unseparated(" )");
+        }
+
+        let res = qb.build_query_as::<Duplicata>().fetch_all(&self.pool).await;
+
+        return res;
     }
 }

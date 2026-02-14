@@ -1,8 +1,6 @@
-use crate::storage::data;
-
 #[cfg(test)]
 mod tests {
-    use crate::storage::data::tokenize;
+    use crate::storage::duplicata::{normalize_str, normalize_title, tokenize};
 
     #[test]
     fn tokenize_input_empty() {
@@ -49,8 +47,6 @@ mod tests {
         }
     }
 
-    use crate::storage::data::normalize_str;
-    use crate::storage::data::normalize_title;
     #[test]
     fn normalize_str_basic_lowercase() {
         assert_eq!(normalize_str("Hello World"), "hello world");

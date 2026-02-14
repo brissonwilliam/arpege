@@ -16,6 +16,13 @@ pub static CREATE_DB_QUERIES: &[&'static str] = &[
     "CREATE INDEX IF NOT EXISTS idx_song_album ON song(album_id, track_number)",
     "CREATE INDEX IF NOT EXISTS idx_duration ON song(duration)",
     r#"
+        CREATE TABLE IF NOT EXISTS song_token (
+            song_id BLOB(16) PRIMARY KEY,
+            token CHAR(3) NOT NULL
+        )
+    "#,
+    "CREATE INDEX IF NOT EXISTS idx_song_tokens ON song_token (token)",
+    r#"
         CREATE TABLE IF NOT EXISTS artist (
             id BLOB(16) PRIMARY KEY,
             created DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

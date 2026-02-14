@@ -1,5 +1,5 @@
-mod data;
-mod data_test;
+mod duplicata;
+mod duplicata_test;
 mod myquery;
 mod storage;
 

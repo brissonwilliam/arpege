@@ -38,7 +38,7 @@ async fn ensure_ready(pool: &sqlx::SqlitePool) -> Result<(), sqlx::Error> {
 
 #[derive(Debug, Clone)]
 pub struct Storage {
-    pool: sqlx::Pool<sqlx::Sqlite>,
+    pub pool: sqlx::Pool<sqlx::Sqlite>,
 }
 
 impl Storage {
