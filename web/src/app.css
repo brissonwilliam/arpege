@@ -13,7 +13,7 @@
   line-height: 1.5;
   font-weight: 400;
 
-  --footer-height: 60px;
+  --footer-height: 100;
   --border: #404040; 
   --bg: #242424;
   --bg-low: #1a1a1a;
@@ -32,9 +32,11 @@
     width: 100%;
     height: var(--footer-height);
     background-color: var(--bg-low);
+
     position: fixed;
     bottom: 0;
     left: 0;
+
     border-radius: 10px;
     border-top: 1px solid var(--border);
 }
