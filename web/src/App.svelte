@@ -8,7 +8,5 @@
 
 <Header />
 <Sidebar />
-<div class="center">
-    <Content />
-</div>
+<Content />
 <Footer />

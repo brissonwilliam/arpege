@@ -1,9 +1,9 @@
 <script>
 </script>
 
-<div class="content">
-    <h3 class="mb-3 mt-0">Songs</h3>
-    <div class="w-full px-3 table">
+<div class="content content-dim">
+    <div class="w-full px-3 table content-dim">
+        <div class="item-row" style="min-height: var(--content-overflow-top)"></div>
         {#each Array(50) as _, i}
             <div class="item-row">
                 <p><span class="iconamoon--player-play-fill"></span></p>
@@ -22,87 +22,14 @@
                 <p>2026-02-01</p>
             </div>
         {/each}
-<div class="item-row" style="min-height: calc(var(--song-item-height) * 2)"></div>
-
-        <!-- 
-        <table class="w-full text-left">
-            <thead class="items-head">
-                <tr>
-                    <th></th>
-                    <th style="min-width: 25px">Title</th>
-                    <th style="min-width: 300px"></th>
-                    <th style="min-width: 30px">Artist</th>
-                    <th style="min-width: 50px">Album</th>
-                    <th>Date added</th>
-                </tr>
-            </thead>
-            <tbody class="items">
-                {#each Array(50) as _, i}
-                    <tr>
-                        <td
-                            ><span class="iconamoon--player-play-fill"
-                            ></span></td
-                        >
-                        <td>[img]</td>
-                        <td>Someby That I Used To Know</td>
-                        <td>Goty</td>
-                        <td></td>
-                        <td>2026-02-01</td>
-                    </tr>
-                    <tr>
-                        <td
-                            ><span class="iconamoon--player-play-fill"
-                            ></span></td
-                        >
-                        <td>[img]</td>
-                        <td>Someby That I Used To Know</td>
-                        <td>Pierce The Veil</td>
-                        <td>Collide with the sky</td>
-                        <td>2026-02-01</td>
-                    </tr>
-                {/each}
-            </tbody>
-        </table>
-        -->
+        <div class="item-row" style="min-height: var(--content-overflow-bottom)"></div>
     </div>
 </div>
 
 <style>
-    /*
-    .items-head tr {
-        height: 2.2rem;
-    }
-    .items tr {
-        border-top: 1px solid var(--border-low);
-        height: var(--song-item-height);
-    }
-    .items tr:hover {
-        background-color: var(--bg-high);
-    }
-    .items tr:hover td:first-child {
-        border-top-left-radius: 10px;
-        border-bottom-left-radius: 10px;
-    }
-    .items tr:hover td:last-child {
-        border-top-right-radius: 14px;
-        border-bottom-right-radius: 14px;
-    }
-    table {
-        overflow-y: scroll;
-        max-height: 50vh;
-    }
-    table th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-        background-color: var(--bg-high);
-    }
-    */
     .table {
-        overflow-y: scroll;
-        height: calc(100vh - var(--header-height) - var(--footer-height) + 65px); /* add some overflow for beautiful transparency */
         display: block;
-        top: 10px;
+        overflow-y: scroll;
     }
 
     .item-row {
@@ -114,6 +41,7 @@
         gap: 20px;
         margin: 0;
     }
+
     .item-row:hover {
         background-color: var(--bg-high);
         border-radius: 15px;
