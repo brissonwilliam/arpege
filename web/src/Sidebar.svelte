@@ -8,6 +8,7 @@
 </script>
 
 <div class="sidebar" >
+    <h2>Arpege</h2>
     <div class="mt-5">
         <div class="navrow hover:border-1">
             <IconSong height="1.5em" />

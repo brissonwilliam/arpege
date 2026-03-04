@@ -3,8 +3,8 @@
 
 <div class="content content-dim">
     <div class="w-full px-3 table content-dim">
-        <div class="item-row" style="min-height: var(--content-overflow-top)"></div>
-        {#each Array(50) as _, i}
+        <div class="gaprow nohover" style="min-height: var(--content-overflow-top)"></div>
+        {#each Array(500) as _, i}
             <div class="item-row">
                 <p><span class="iconamoon--player-play-fill"></span></p>
                 <p>[img]</p>
@@ -22,14 +22,12 @@
                 <p>2026-02-01</p>
             </div>
         {/each}
-        <div class="item-row" style="min-height: var(--content-overflow-bottom)"></div>
+        <div class="gaprow" style="min-height: var(--content-overflow-bottom)"></div>
     </div>
 </div>
 
 <style>
     .table {
-        display: block;
-        overflow-y: scroll;
     }
 
     .item-row {
@@ -55,6 +53,12 @@
     table tr td:last-child {
         padding-right: 12px;
     }
+
+    .gaprow {
+        background-color: inherit !important;
+        height: var(--song-item-height);
+    }
+
     .items tr:hover .iconamoon--player-play-fill {
         display: flex;
     }

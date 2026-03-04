@@ -3,9 +3,9 @@
 </script>
 
 <div class="header">
-    <h2 class="ml-1 w-4/12">Arpege</h2>
-    <div class="w-5/12">
+    <h2 class="w-3/12"></h2>
+    <div class="w-6/12">
         <Search />
     </div>
-    <div class="w-4/12"></div>
+    <div class="w-3/12"></div>
 </div>
