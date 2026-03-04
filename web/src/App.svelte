@@ -2,11 +2,13 @@
     import "./app.css";
     import Sidebar from "./Sidebar.svelte";
     import Footer from "./Footer.svelte";
+    import Header from "./Header.svelte";
     import Content from "./Content.svelte";
 </script>
 
-<div class="layout">
-    <Sidebar />
+<Header />
+<Sidebar />
+<div class="center">
     <Content />
 </div>
 <Footer />

@@ -5,7 +5,7 @@
 </script>
 
 <div class="footer">
-    <div class="player flex justify-between items-center">
+    <div class="player h-full flex justify-between items-center">
         <div class="w-2/10 text-xs">
             <p>Now playing (nice icon + song name)</p>
         </div>

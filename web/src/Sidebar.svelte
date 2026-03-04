@@ -8,9 +8,6 @@
 </script>
 
 <div class="sidebar" >
-    <div class="flex flex-row items-center">
-        <h2>Arpege</h2>
-    </div>
     <div class="mt-5">
         <div class="navrow hover:border-1">
             <IconSong height="1.5em" />
