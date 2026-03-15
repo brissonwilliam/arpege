@@ -17,6 +17,9 @@ pub fn normalize_str(s: &str) -> String {
     norm = norm.replace("`", "");
     norm = norm.replace("(", "");
     norm = norm.replace(")", "");
+    norm = norm.replace("\n", " ");
+    norm = norm.replace("\r", " ");
+    norm = norm.replace("\t", " ");
     return norm;
 }
 
@@ -25,12 +28,11 @@ pub fn normalize_title(s: &str) -> String {
     norm = norm.replace("feat", "");
     norm = norm.replace("remastered", "");
     norm = norm.replace("remaster", "");
-    norm = norm.replace("live", "");
     norm = norm.replace("and", "&");
     return norm;
 }
 
-pub fn tokenize(s: String) -> Vec<String> {
+pub fn tokenize(s: &String) -> Vec<String> {
     let mut ret = Vec::new();
 
     for word in s.split(" ") {
@@ -38,7 +40,7 @@ pub fn tokenize(s: String) -> Vec<String> {
             continue;
         }
 
-        if word.len() <= 3 {
+        if word.len() <= 2 {
             let remainder = String::from(&word[0..word.len()]);
             ret.push(remainder);
             continue;
@@ -47,7 +49,7 @@ pub fn tokenize(s: String) -> Vec<String> {
         // push a sliding window of string
         let mut i = 1;
         while i + 1 < word.len() {
-            let tok = String::from(&word[i - 1..i + 2]); // +2 because upper bound is excluded
+            let tok = String::from(&word[i - 1..i + 1]); // +1 because upper bound is excluded
             ret.push(tok);
             i += 1;
         }
@@ -56,70 +58,129 @@ pub fn tokenize(s: String) -> Vec<String> {
 }
 
 pub struct PruneDuplicataCriteria {
-    title_tokens: Vec<String>,
-    duration_ms: Option<u32>,
-    artist_tokens: Vec<String>,
+    pub title: String,
+    pub artists: Vec<String>,
+    pub duration_ms: Option<u32>,
+    pub title_tokens: Vec<String>,
+    pub artist_tokens: Vec<String>,
+    pub album_tokens: Vec<String>,
 }
 
 impl PruneDuplicataCriteria {
     pub fn new(title: String, duration_ms: Option<u32>, artists: Vec<String>) -> Self {
         let title_norm = normalize_title(title.as_str());
-        let title_tokens = tokenize(title_norm);
+        let title_tokens = tokenize(&title_norm);
 
         let mut artist_tokens = Vec::new();
-        for a in artists {
+        for a in artists.iter() {
             let norm = normalize_str(a.as_str());
-            let toks = tokenize(norm);
+            let toks = tokenize(&norm);
             artist_tokens.extend(toks);
         }
 
         return PruneDuplicataCriteria {
-            title_tokens,
-            duration_ms,
+            title: title_norm,
+            duration_ms: duration_ms,
+            artists: artists,
+            title_tokens: title_tokens,
             artist_tokens: artist_tokens,
+            album_tokens: vec![],
         };
     }
 }
 
 #[derive(Debug, FromRow)]
-pub struct Duplicata {}
+pub struct DuplicataCandidate {
+    pub id: [u8; 16],
+    pub title: String,
+    pub weight: u8,
+}
 
 impl storage::Storage {
     pub async fn get_duplicates(
         &self,
         criteria: PruneDuplicataCriteria,
-    ) -> Result<Vec<Duplicata>, sqlx::Error> {
+    ) -> Result<Vec<DuplicataCandidate>, sqlx::Error> {
         let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
             r#"
-            SELECT id FROM song 
+            SELECT id, title FROM song 
             WHERE id IN (SELECT song_id FROM song_token WHERE token IN (
         "#,
         );
+
+        // song_token filter
         let mut qsep = qb.separated(",");
         for t in criteria.title_tokens.iter() {
             qsep.push_bind(t.as_str());
         }
         qsep.push_unseparated("))");
 
+        // artist_token filter
+        if criteria.artist_tokens.len() > 0 {
+            qb.push(" AND artist_id IN (SELECT artist_id FROM artist_token WHERE token IN (");
+            let mut qsep = qb.separated(",");
+            for at in criteria.artist_tokens.iter() {
+                qsep.push_bind(at.as_str());
+            }
+            qsep.push_unseparated("))");
+        }
+
+        // album_token filter
+        if criteria.artist_tokens.len() > 0 {
+            qb.push(" AND album_id IN (SELECT album_id FROM album_token WHERE token IN (");
+            let mut qsep = qb.separated(",");
+            for at in criteria.album_tokens.iter() {
+                qsep.push_bind(at.as_str());
+            }
+            qsep.push_unseparated("))");
+        }
+
+        // duration filter
         if let Some(duration_ms) = criteria.duration_ms {
             qb.push(" AND duration_ms BETWEEN ");
-            let delta_duration = 3000;
+            let delta_duration = 5000;
             qb.push_bind(duration_ms - delta_duration);
             qb.push(" AND ");
             qb.push_bind(duration_ms + delta_duration);
         }
 
-        if criteria.artist_tokens.len() > 0 {
-            qb.push(" AND artist_id IN ( ");
-            let mut qsep = qb.separated(",");
-            for at in criteria.artist_tokens.iter() {
-                qsep.push_bind(at.as_str());
-            }
-            qsep.push_unseparated(" )");
-        }
-
-        let res = qb.build_query_as::<Duplicata>().fetch_all(&self.pool).await;
+        let res = qb
+            .build_query_as::<DuplicataCandidate>()
+            .fetch_all(&self.pool)
+            .await;
 
         return res;
     }
+}
+
+fn prune_by_weight(criteria: PruneDuplicataCriteria, mut candidates: Vec<DuplicataCandidate>) {
+    // Weights is a number that gives an idea of how much metadata
+    // was actually matched depending on the request input
+    // It is not used to give a match score, but rahter to compare candidates within
+    // themselves to keep candidates that match the most entries based on how much metadata
+    // collided
+    const TITLE_WEIGHT: u8 = 10;
+    const DURATION_WEIGHT: u8 = 15;
+    const ARTIST_WEIGHT: u8 = 8;
+    const ALBUM_WEIGHT: u8 = 2;
+    const TOTAL_WEIGHT: u8 = TITLE_WEIGHT + DURATION_WEIGHT + ARTIST_WEIGHT + ALBUM_WEIGHT;
+
+    for c in candidates.iter_mut() {
+        let mut score = TITLE_WEIGHT;
+        if let Some(_) = criteria.duration_ms {
+            score += DURATION_WEIGHT;
+        }
+        if criteria.artist_tokens.len() > 0 {
+            // we matched an artist token, augment the score
+            score += ARTIST_WEIGHT
+        }
+        if criteria.album_tokens.len() > 0 {
+            score += ALBUM_WEIGHT
+        }
+        c.weight = score / TOTAL_WEIGHT;
+    }
+
+    // Prune, keep the best 10
+    candidates.sort_by(|a, b| return a.weight.cmp(&b.weight));
+    candidates.truncate(10);
 }

@@ -1,38 +1,40 @@
 #[cfg(test)]
 mod tests {
-    use crate::storage::duplicata::{normalize_str, normalize_title, tokenize};
+    use crate::storage::duplicata::{
+        normalize_str, normalize_title, tokenize, DuplicataCandidate, PruneDuplicataCriteria,
+    };
 
     #[test]
     fn tokenize_input_empty() {
-        let out = tokenize(String::from(""));
+        let out = tokenize(&String::from(""));
         let expected = vec![];
         assert_cmp(expected, out);
     }
 
     #[test]
     fn tokenize_input_less_than_tokensize() {
-        let out = tokenize(String::from("a bb"));
+        let out = tokenize(&String::from("a bb"));
         let expected = vec!["a", "bb"];
         assert_cmp(expected, out);
     }
 
     #[test]
     fn tokenize_input_eq_tokensize() {
-        let out = tokenize(String::from("123 abc"));
+        let out = tokenize(&String::from("123 abc"));
         let expected = vec!["123", "abc"];
         assert_cmp(expected, out);
     }
 
     #[test]
     fn tokenize_input_bigger_tokensize_with_remainder() {
-        let out = tokenize(String::from("123a 45678"));
+        let out = tokenize(&String::from("123a 45678"));
         let expected = vec!["123", "23a", "456", "567", "678"];
         assert_cmp(expected, out);
     }
 
     #[test]
     fn tokenize_input_realistic() {
-        let out = tokenize(String::from("call me maybe"));
+        let out = tokenize(&String::from("call me maybe"));
         let expected = vec!["cal", "all", "me", "may", "ayb", "ybe"];
         assert_cmp(expected, out);
     }
@@ -78,9 +80,9 @@ mod tests {
     }
 
     #[test]
-    fn normalize_title_removes_feat_and_live() {
+    fn normalize_title_removes_feat() {
         let input = "My Song feat Artist Live";
-        let expected = "my song  artist ";
+        let expected = "my song  artist live";
         assert_eq!(normalize_title(input), expected);
     }
 
@@ -97,5 +99,37 @@ mod tests {
         let input = "LIVE-AND-LOUD";
         let expected = "&loud";
         assert_eq!(normalize_title(input), expected);
+    }
+
+    fn get_prune_criteria() -> PruneDuplicataCriteria {
+        return PruneDuplicataCriteria {
+            title: String::from("la vie c'est triste non"),
+            artists: vec![String::from("mike le Tigre")],
+            duration_ms: Some(55000),
+            title_tokens: vec![String::from("la"), String::from("vie")],
+            artist_tokens: vec![String::from("mik"), String::from("le ")],
+            album_tokens: vec![String::from("album"), String::from("de feu!")],
+        };
+    }
+
+    fn make_dupe_candidates() -> Vec<DuplicataCandidate> {
+        let candidates: Vec<DuplicataCandidate> = vec![
+            DuplicataCandidate {
+                id: [1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4],
+                title: todo!(),
+                weight: 0,
+            },
+            DuplicataCandidate {
+                id: [1, 2, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                title: todo!(),
+                weight: 0,
+            },
+        ];
+        return candidates;
+    }
+
+    #[test]
+    fn prune_by_weight_all_criteria() {
+        let crit = get_prune_criteria();
     }
 }
