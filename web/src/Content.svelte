@@ -3,7 +3,10 @@
 
 <div class="content content-dim">
     <div class="w-full px-3 table content-dim">
-        <div class="gaprow nohover" style="min-height: var(--content-overflow-top)"></div>
+        <div
+            class="gaprow nohover"
+            style="min-height: var(--content-overflow-top)"
+        ></div>
         {#each Array(500) as _, i}
             <div class="item-row">
                 <p><span class="iconamoon--player-play-fill"></span></p>
@@ -22,7 +25,10 @@
                 <p>2026-02-01</p>
             </div>
         {/each}
-        <div class="gaprow" style="min-height: var(--content-overflow-bottom)"></div>
+        <div
+            class="gaprow"
+            style="min-height: var(--content-overflow-bottom)"
+        ></div>
     </div>
 </div>
 

@@ -7,7 +7,7 @@
     import IconArtist from "@iconify-svelte/iconamoon/music-artist-duotone";
 </script>
 
-<div class="sidebar" >
+<div class="sidebar">
     <h2>Arpege</h2>
     <div class="mt-5">
         <div class="navrow hover:border-1">
@@ -36,5 +36,9 @@
         gap: 16px;
         border-radius: 12px;
         padding: 8px;
+        border: 2px solid transparent;
+    }
+    .navrow:hover {
+        border: 2px solid var(--border-high);
     }
 </style>

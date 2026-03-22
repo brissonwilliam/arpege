@@ -188,7 +188,6 @@ body {
     background-color: var(--bg-sidebar);
     padding: 12px;
     border-right: 3px solid var(--border);
-    border-radius: 0px 15px 0px 0px;
     box-shadow: -10px 0 30px var(--glow);
 
     width: var(--sidebar-width);
