@@ -1,5 +1,5 @@
 export interface ChunkMeta {
-  uuid: string;
+  id: string;
   start_ms: number;
   end_ms: number;
 }

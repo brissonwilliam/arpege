@@ -42,7 +42,7 @@ export class MusicPlayerStore {
         this.player.onError = (msg) => handleErr(this, msg);
 
         try {
-            const res = await fetch(`/api/song/${HARDCODED_SONG_ID}`);
+            const res = await fetch(`/api/songs/md?s=${HARDCODED_SONG_ID}`);
             if (!res.ok) {
                 throw new Error(`Metadata fetch failed: HTTP ${res.status}`);
             }

@@ -168,7 +168,7 @@ export class MusicPlayer {
         this.fetchController = new AbortController();
         try {
             const res = await fetch(
-                `/api/song/${this.meta.id}/chunks?c=${chunk.uuid}`,
+                `/api/songs/chunks?c=${chunk.id}&s=${this.meta.id}`,
                 { signal: this.fetchController.signal }
             );
             if (!res.ok) {
