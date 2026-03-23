@@ -1,11 +1,18 @@
-use axum::{body, http, response, routing, Router};
+use crate::rest::{song_chunk, song_md};
+use axum::{routing, Router};
 use log;
 
 pub async fn start() {
     let host = "0.0.0.0:8222";
     log::info!("starting web api on {host}");
 
-    let app = Router::new().route("/", routing::get(hello));
+    let api = Router::new()
+        .route("/songs/md", routing::get(song_md::get_song_md))
+        .route("/songs/chunks", routing::get(song_chunk::get_song_chunk));
+
+    let app = Router::new()
+        .route("/", routing::get(hello))
+        .nest("/api", api);
 
     let listener = tokio::net::TcpListener::bind(host).await.unwrap();
     axum::serve(listener, app).await.unwrap();
@@ -13,12 +20,6 @@ pub async fn start() {
 
 async fn hello() -> &'static str {
     "Hello, World!"
-}
-
-async fn get_song_md() {
-    // query db: does it exist?
-    // Return allll the good info!
-    // Plus audio file info as well
 }
 
 // Not sure how this is going to be called

@@ -1,0 +1,9 @@
+# transcode in chunks
+ffmpeg -i ./data/import/ato.m4a -f segment -segment_time 10 -loglevel warning -c:v copy -c:a aac -b:a 196k -movflags +faststart+frag_keyframe+empty_moov+default_base_moof data/fs/transcodes/out_%03d.m4a
+
+# probe
+ffprobe -loglevel warning -show_format -show_streams -print_format json data/import/ato.m4a
+
+# probe transcode
+ffprobe -loglevel warning -show_format -show_streams -print_format json data/fs/transcodes/out_000.m4a
+

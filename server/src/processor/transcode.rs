@@ -1,5 +1,8 @@
 use crate::config;
 
+// TODO: make these configurable
+const SEGMENT_TIME_SECS: &str = "8";
+
 pub fn transcode(path: &str) -> Result<(), std::io::Error> {
     let start = std::time::Instant::now();
 
@@ -13,7 +16,7 @@ pub fn transcode(path: &str) -> Result<(), std::io::Error> {
         "-f",
         "segment",
         "-segment_time",
-        "8",
+        SEGMENT_TIME_SECS,
         // reduce logging
         "-loglevel",
         "warning", // [quiet, panic, error, warning, info, verbose, debug, trace]
@@ -25,13 +28,21 @@ pub fn transcode(path: &str) -> Result<(), std::io::Error> {
         "aac",
         "-b:a",
         kbs.as_str(),
+        // moovflag must be added to embed metadata on each chunk for streaming
         "-movflags",
-        "+faststart",
+        // faststart = move md to the begining of chunk
+        // frag_keyframe = fragment at each keyframe
+        // empty_moov = empty header for faster streams
+        "+faststart+frag_keyframe+empty_moov+default_base_moof",
         "data/fs/transcodes/out_%03d.m4a", // todo: smarter split, write into uuid given by db
     ]
     .to_vec();
 
-    log::info!("transcoding {} | invoking 'ffmpeg {}'", path, args.join(" "));
+    log::info!(
+        "transcoding {} | invoking 'ffmpeg {}'",
+        path,
+        args.join(" ")
+    );
 
     let cmd = match std::process::Command::new("ffmpeg")
         .args(args)
