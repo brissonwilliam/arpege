@@ -1,5 +1,29 @@
-<script>
+<script lang="ts">
+    import { Player } from "./lib/player/Player";
+    import { PlayerState as pstate } from "./lib/player/types";
 
+    const p = new Player();
+    p.load();
+
+    let isPlaying = false;
+
+    async function togglePlayPause() {
+        switch (p.state) {
+            case pstate.PLAYING:
+                p.pause();
+                isPlaying = false;
+                break;
+            case pstate.PAUSED:
+                await p.play();
+                isPlaying = true;
+                break;
+            case pstate.ERROR:
+                await p.load();
+                await p.play();
+                isPlaying = true;
+                break;
+        }
+    }
 </script>
 
 <div class="footer">
@@ -10,10 +34,14 @@
         <div class="w-8/12">
             <div class="flex justify-center lg:gap-7 gap-3">
                 <div class="player-btn start-btn"></div>
-                <div class="player-btn play-btn">
-                    <div class="play-btn"></div>
-                    <div class="pause-btn"></div>
-                </div>
+                <button
+                    on:click={togglePlayPause}
+                    aria-label="play-pause"
+                    class={!isPlaying
+                        ? "player-btn play-btn"
+                        : "player-btn pause-btn"}
+                >
+                </button>
                 <div class="player-btn end-btn"></div>
             </div>
             <div class="mt-3 text-center text-xs">
@@ -43,6 +71,7 @@
     .player-btn {
         cursor: pointer;
     }
+
     .start-btn {
         --svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='%23000' stroke-linejoin='round' stroke-width='2'%3E%3Cpath d='M7 13.732c-1.333-.77-1.333-2.694 0-3.464l9-5.196c1.333-.77 3 .192 3 1.732v10.392c0 1.54-1.667 2.502-3 1.732z'/%3E%3Cpath stroke-linecap='round' d='M4 19V5'/%3E%3C/g%3E%3C/svg%3E");
         -webkit-mask-image: var(--svg);
@@ -66,6 +95,20 @@
         -webkit-mask-image: var(--svg);
         mask-image: var(--svg);
     }
+
+    .pause-btn {
+        width: 2.8rem;
+        height: 2.8rem;
+        --svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%23000' stroke-linejoin='round' stroke-width='2' d='M5 7a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2zm9 0a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2z'/%3E%3C/svg%3E");
+        -webkit-mask-image: var(--svg);
+        mask-image: var(--svg);
+    }
+    .pause-btn:hover {
+        --svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M4 7a3 3 0 0 1 3-3h1a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3zm12-3a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h1a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3z' clip-rule='evenodd'/%3E%3C/svg%3E");
+        -webkit-mask-image: var(--svg);
+        mask-image: var(--svg);
+    }
+
     .end-btn {
         --svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='%23000' stroke-linejoin='round' stroke-width='2'%3E%3Cpath d='M17 10.268c1.333.77 1.333 2.694 0 3.464l-9 5.196c-1.333.77-3-.192-3-1.732V6.804c0-1.54 1.667-2.502 3-1.732z'/%3E%3Cpath stroke-linecap='round' d='M20 5v14'/%3E%3C/g%3E%3C/svg%3E");
         -webkit-mask-image: var(--svg);

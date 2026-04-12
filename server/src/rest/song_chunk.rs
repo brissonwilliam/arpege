@@ -30,5 +30,6 @@ pub async fn get_song_chunk(
 
 fn read_chunk(id: &str) -> std::io::Result<Vec<u8>> {
     let path: String = "./data/fs/transcodes/".to_owned() + id;
+    log::info!("reading {}", path);
     return std::fs::read(path);
 }
