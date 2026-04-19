@@ -1,11 +1,55 @@
 <script lang="ts">
+    import { onDestroy, onMount } from "svelte";
     import { Player } from "./lib/player/Player";
     import { PlayerState as pstate } from "./lib/player/types";
 
     const p = new Player();
-    p.load();
+
+    const POLL_MS = 250;
 
     let isPlaying = false;
+    let currentMs = 0;
+    let durationMs = 0;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+    function formatMmSs(totalSeconds: number): string {
+        const s = Math.floor(totalSeconds);
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return `${m}:${r.toString().padStart(2, "0")}`;
+    }
+
+    function refreshFromPlayer() {
+        currentMs = p.getCurrentTimeMs();
+        durationMs = p.meta?.duration_ms ?? 0;
+        isPlaying = p.isPlaying;
+    }
+
+    function onProgressClick(e: MouseEvent & { currentTarget: HTMLElement }) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const w = rect.width;
+        const dm = p.meta?.duration_ms ?? 0;
+        if (w <= 0 || dm <= 0) {
+            return;
+        }
+        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / w));
+        const durationSec = Math.max(0, Math.round(dm / 1000));
+        const targetSec = Math.round(ratio * durationSec);
+        void p.seek(targetSec);
+    }
+
+    onMount(async () => {
+        await p.load();
+        refreshFromPlayer();
+        pollTimer = setInterval(refreshFromPlayer, POLL_MS);
+    });
+
+    onDestroy(() => {
+        if (pollTimer !== null) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+    });
 
     async function togglePlayPause() {
         switch (p.state) {
@@ -23,6 +67,7 @@
                 isPlaying = true;
                 break;
         }
+        refreshFromPlayer();
     }
 </script>
 
@@ -44,8 +89,31 @@
                 </button>
                 <div class="player-btn end-btn"></div>
             </div>
-            <div class="mt-3 text-center text-xs">
-                |----------PROGRESS BAR-------|
+            <div class="mt-3 flex items-center gap-2 text-xs">
+                <span
+                    class="shrink-0 tabular-nums text-neutral-500 dark:text-neutral-400"
+                    >{formatMmSs(currentMs / 1000)}</span
+                >
+                <div
+                    class="progress-hit relative flex min-h-[36px] flex-1 cursor-pointer items-center py-3"
+                    on:click={onProgressClick}
+                    role="presentation"
+                >
+                    <div
+                        class="progress-track h-2 w-full rounded-full bg-neutral-200 dark:bg-neutral-700"
+                    >
+                        <div
+                            class="progress-fill h-full rounded-full bg-neutral-600 dark:bg-neutral-300"
+                            style="width: {durationMs > 0
+                                ? Math.min(100, (currentMs / durationMs) * 100)
+                                : 0}%"
+                        ></div>
+                    </div>
+                </div>
+                <span
+                    class="shrink-0 tabular-nums text-neutral-500 dark:text-neutral-400"
+                    >{formatMmSs(durationMs / 1000)}</span
+                >
             </div>
         </div>
         <div class="w-2/10 text-xs text-right">

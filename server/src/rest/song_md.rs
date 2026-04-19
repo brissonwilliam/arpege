@@ -32,7 +32,7 @@ pub async fn get_song_md() -> axum::response::Response {
         id: "123-456".to_owned(),
         title: "24".to_owned(),
         artist: "ato".to_owned(),
-        duration_ms: 243438,
+        duration_ms: 59996,
         mime_type: "audio/mp4".to_owned(),
         chunks: vec![
             ChunkMeta {

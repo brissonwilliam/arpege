@@ -65,6 +65,10 @@ export class Player {
         return this.songMeta;
     }
 
+    get isPlaying(): boolean {
+        return this.isAudioRunning;
+    }
+
     /** Updates internal state (used by async paths and audio events). */
     private setState(s: PlayerState) {
         this._state = s;
@@ -423,8 +427,8 @@ export class Player {
     }
 
     /**
-     * Returns the current global timeline position in ms for UI (e.g. progress bar),
-     * using the Web Audio clock while playing and `pausedAtMs` while paused.
+     * Current playback position on the song timeline in milliseconds (UI / polling).
+     * Uses the Web Audio clock while playing and `pausedAtMs` while paused.
      */
     getCurrentTimeMs(): number {
         if (!this.songMeta) {
@@ -442,10 +446,10 @@ export class Player {
     }
 
     /**
-     * Seeks to `positionMs` on the song timeline. Decodes the target chunk (and kicks off
-     * decode-ahead) so `play()` can start immediately afterward. Preserves play/pause.
+     * Seeks to `second` (rounded to whole seconds) on the song timeline. Decodes the target chunk
+     * (and kicks off decode-ahead) so `play()` can start immediately afterward. Preserves play/pause.
      */
-    async seek(positionMs: number): Promise<void> {
+    async seek(second: number): Promise<void> {
         if (!this.songMeta) {
             console.log(LOG_PREFIX, "seek without md");
             return;
@@ -453,11 +457,18 @@ export class Player {
         this.actionCounter += 1;
         const gen = this.actionCounter;
         const wasPlaying = this.isAudioRunning;
-        const ms = this.clampTimelineMs(positionMs);
+        const durationSec = Math.max(0, Math.round(this.songMeta.duration_ms / 1000));
+        const secClamped = Math.max(0, Math.min(Math.round(second), durationSec));
+        const ms = this.clampTimelineMs(secClamped * 1000);
         this.playbackComplete = false;
         const i = this.findChunkIndex(ms);
 
-        console.log(LOG_PREFIX, "seek", { requested: positionMs, clamped: ms, chunkIndex: i });
+        console.log(LOG_PREFIX, "seek", {
+            requestedSec: second,
+            clampedSec: secClamped,
+            ms,
+            chunkIndex: i,
+        });
 
         this.stopAllSources();
         this.isAudioRunning = false;
@@ -480,9 +491,6 @@ export class Player {
 
             if (wasPlaying) {
                 await this.beginPlaybackFrom(ms);
-                if (gen !== this.actionCounter) {
-                    return;
-                }
                 this.setState(PlayerState.PLAYING);
             } else {
                 this.setState(PlayerState.PAUSED);
@@ -556,7 +564,7 @@ export class Player {
         }
         this.stopAllSources();
         this.isAudioRunning = false;
-        void this.audioCtx.suspend().catch(() => {});
+        void this.audioCtx.suspend().catch(() => { });
         if (this._state === PlayerState.PLAYING) {
             this.setState(PlayerState.PAUSED);
         }
@@ -571,7 +579,7 @@ export class Player {
         this.stopAllSources();
         this.isAudioRunning = false;
         this.clearDecodeCaches();
-        void this.audioCtx?.close().catch(() => {});
+        void this.audioCtx?.close().catch(() => { });
         this.audioCtx = null;
         this.gainNode = null;
         this.songMeta = null;
