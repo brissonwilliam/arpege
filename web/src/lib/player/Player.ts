@@ -7,37 +7,51 @@ export type PlayerOptions = {
 
 const LOG_PREFIX = "[Player]";
 
+/** How many upcoming chunks to decode ahead of the schedule tail (not counting the current one). */
+const PREFETCH_CHUNK_COUNT = 4;
+
+function isAbortError(e: unknown): boolean {
+    return e instanceof Error && e.message === "aborted";
+}
+
 /**
- * Chunked playback over `/api/songs/md` and `/api/songs/chunks?c=…` using
- * HTMLAudioElement and blob URLs.
+ * Chunked playback over `/api/songs/md` and `/api/songs/chunks?c=…` using Web Audio
+ * (`decodeAudioData` + scheduled `AudioBufferSourceNode`s) so chunk boundaries are
+ * sample-accurate, with aggressive decode-ahead for smooth continuation.
  */
 export class Player {
     private readonly baseUrl: string;
-    private readonly audio: HTMLAudioElement;
     private _state: PlayerState = PlayerState.PAUSED;
     private songMeta: SongMeta | null = null;
-    /** Index of the chunk currently loaded into `audio`. */
-    private chunkIndex = 0;
-    private objectUrl: string | null = null;
     /** Used to abort any previous ongoing actions */
     private actionCounter = 0;
     /** Song played through to the end; `getCurrentTimeMs` reports `duration_ms` until seek/play. */
     private playbackComplete = false;
 
-    private readonly onAudioEnded = () => {
-        void this.handleEnded();
-    };
+    private audioCtx: AudioContext | null = null;
+    private gainNode: GainNode | null = null;
 
-    private readonly onAudioError = () => {
-        this.handleAudioError();
-    };
+    private decoded = new Map<number, AudioBuffer>();
+    private decoding = new Map<number, Promise<AudioBuffer>>();
+
+    private activeSources: AudioBufferSourceNode[] = [];
+
+    /** Timeline head when paused / before first `play` (ms). */
+    private pausedAtMs = 0;
+
+    /** When `isAudioRunning`, maps `audioCtx.currentTime` to the global timeline (ms). */
+    private playStartTimelineMs = 0;
+    private playStartCtxTime = 0;
+    private isAudioRunning = false;
+
+    /** Next chunk index to append after `scheduleTailCtxTime` (exclusive end of chain so far). */
+    private scheduleNextIdx = 0;
+    /** AudioContext time where the next decoded chunk should begin. */
+    private scheduleTailCtxTime = 0;
 
     /** Creates a player; optional `baseUrl` defaults to `"/api"` (Vite proxy). */
     constructor(options?: PlayerOptions) {
         this.baseUrl = options?.baseUrl ?? "/api";
-        this.audio = new Audio();
-        this.audio.addEventListener("ended", this.onAudioEnded);
-        this.audio.addEventListener("error", this.onAudioError);
         console.log(LOG_PREFIX, "constructed", { baseUrl: this.baseUrl });
     }
 
@@ -56,18 +70,44 @@ export class Player {
         this._state = s;
     }
 
-    /** Dispatched when the media element hits a decode/network error. */
-    private handleAudioError() {
-        console.warn(LOG_PREFIX, "audio error event");
-        this.setState(PlayerState.ERROR);
+    private stopAllSources() {
+        for (const s of this.activeSources) {
+            try {
+                s.stop(0);
+            } catch {
+                /* already stopped / not started */
+            }
+            try {
+                s.disconnect();
+            } catch {
+                /* ignore */
+            }
+        }
+        this.activeSources = [];
     }
 
-    /** Revokes the current blob object URL so the blob can be GC’d. */
-    private revokeUrl() {
-        if (this.objectUrl) {
-            URL.revokeObjectURL(this.objectUrl);
-            this.objectUrl = null;
+    /** Creates `AudioContext` / `GainNode` if needed; does **not** resume (decode works while suspended). */
+    private ensureContextExists(): AudioContext {
+        if (!this.audioCtx) {
+            const Ctor =
+                window.AudioContext ??
+                (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+            if (!Ctor) {
+                throw new Error("Web Audio not supported");
+            }
+            this.audioCtx = new Ctor();
+            this.gainNode = this.audioCtx.createGain();
+            this.gainNode.connect(this.audioCtx.destination);
         }
+        return this.audioCtx;
+    }
+
+    private async resumeContext(): Promise<AudioContext> {
+        const ctx = this.ensureContextExists();
+        if (ctx.state === "suspended") {
+            await ctx.resume();
+        }
+        return ctx;
     }
 
     /** Builds the chunk GET URL with a properly encoded `c` query param. */
@@ -86,50 +126,188 @@ export class Player {
         return buf;
     }
 
-    /**
-     * Waits until `HTMLMediaElement` has enough data to know `duration` / seek safely,
-     * or rejects if the element errors while loading.
-     */
-    private waitLoadedMetadata(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            if (this.audio.readyState >= HTMLMediaElement.HAVE_METADATA) {
-                resolve();
-                return;
-            }
-            const ok = () => {
-                cleanup();
-                resolve();
-            };
-            const bad = () => {
-                cleanup();
-                reject(new Error("audio metadata"));
-            };
-            const cleanup = () => {
-                this.audio.removeEventListener("loadedmetadata", ok);
-                this.audio.removeEventListener("error", bad);
-            };
-            this.audio.addEventListener("loadedmetadata", ok, { once: true });
-            this.audio.addEventListener("error", bad, { once: true });
-        });
+    private clearDecodeCaches() {
+        this.decoded.clear();
+        this.decoding.clear();
     }
 
     /**
-     * Downloads chunk `i`, wraps it in a Blob with `mime_type`, assigns an object URL to `audio`,
-     * and waits for metadata so `duration` / `currentTime` are usable.
+     * Decodes chunk `i` to an `AudioBuffer` (cached). Throws `{ message: 'aborted' }` if superseded
+     * by `load`, `seek`, or `destroy` while fetching/decoding.
      */
-    private async prepareChunk(i: number): Promise<void> {
+    private async ensureDecoded(i: number): Promise<AudioBuffer> {
         if (!this.songMeta) {
             throw new Error("no song metadata");
         }
-        const chunk = this.songMeta.chunks[i];
-        console.log(LOG_PREFIX, "prepareChunk", { index: i, chunkId: chunk.id });
-        const buf = await this.fetchChunkBuffer(chunk.id);
-        this.revokeUrl();
-        const blob = new Blob([buf], { type: this.songMeta.mime_type });
-        this.objectUrl = URL.createObjectURL(blob);
-        this.chunkIndex = i;
-        this.audio.src = this.objectUrl;
-        await this.waitLoadedMetadata();
+        const hit = this.decoded.get(i);
+        if (hit) {
+            return hit;
+        }
+        const inflight = this.decoding.get(i);
+        if (inflight) {
+            return inflight;
+        }
+
+        const callGen = this.actionCounter;
+
+        const task = (async () => {
+            const chunk = this.songMeta!.chunks[i];
+            console.log(LOG_PREFIX, "ensureDecoded", { index: i, chunkId: chunk.id });
+            const buf = await this.fetchChunkBuffer(chunk.id);
+            if (callGen !== this.actionCounter) {
+                throw new Error("aborted");
+            }
+            const ctx = this.ensureContextExists();
+            const copy = buf.slice(0);
+            const audioBuf = await ctx.decodeAudioData(copy);
+            if (callGen !== this.actionCounter) {
+                throw new Error("aborted");
+            }
+            this.decoded.set(i, audioBuf);
+            this.decoding.delete(i);
+            if (this.isAudioRunning) {
+                this.appendScheduledChain();
+            }
+            return audioBuf;
+        })();
+
+        this.decoding.set(i, task);
+        return task;
+    }
+
+    /** Decode chunk `i` and, if present, `i+1` in parallel so the second can be scheduled immediately after the first. */
+    private async ensureDecodedPairForStart(i: number): Promise<void> {
+        if (!this.songMeta) {
+            return;
+        }
+        const n = this.songMeta.chunks.length;
+        const tasks: Promise<AudioBuffer>[] = [this.ensureDecoded(i)];
+        if (i + 1 < n) {
+            tasks.push(this.ensureDecoded(i + 1));
+        }
+        await Promise.all(tasks);
+    }
+
+    /** Starts background decode for `count` chunks starting at `fromIndex` (inclusive). */
+    private prefetchDecodeAhead(fromIndex: number, count: number) {
+        if (!this.songMeta) {
+            return;
+        }
+        const n = this.songMeta.chunks.length;
+        const to = Math.min(fromIndex + count, n);
+        for (let j = fromIndex; j < to; j++) {
+            void this.ensureDecoded(j).catch((e) => {
+                if (!isAbortError(e)) {
+                    console.warn(LOG_PREFIX, "prefetch decode failed", { index: j, e });
+                }
+            });
+        }
+    }
+
+    /** Appends every already-decoded chunk that fits the tail of the scheduled chain. */
+    private appendScheduledChain() {
+        if (!this.songMeta || !this.audioCtx || !this.gainNode) {
+            return;
+        }
+        const gen = this.actionCounter;
+        const { chunks } = this.songMeta;
+
+        while (this.scheduleNextIdx < chunks.length) {
+            const buf = this.decoded.get(this.scheduleNextIdx);
+            if (!buf) {
+                this.prefetchDecodeAhead(this.scheduleNextIdx, PREFETCH_CHUNK_COUNT);
+                return;
+            }
+
+            const src = this.audioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(this.gainNode);
+
+            const idx = this.scheduleNextIdx;
+            const isLast = idx === chunks.length - 1;
+            if (isLast) {
+                src.onended = () => {
+                    if (gen !== this.actionCounter) {
+                        return;
+                    }
+                    this.handlePlaybackComplete();
+                };
+            }
+
+            src.start(this.scheduleTailCtxTime, 0, buf.duration);
+            this.activeSources.push(src);
+            this.scheduleTailCtxTime += buf.duration;
+            this.scheduleNextIdx += 1;
+        }
+    }
+
+    private handlePlaybackComplete() {
+        if (!this.songMeta) {
+            return;
+        }
+        console.log(LOG_PREFIX, "playback complete");
+        this.playbackComplete = true;
+        this.isAudioRunning = false;
+        this.pausedAtMs = this.songMeta.duration_ms;
+        this.activeSources = [];
+        this.setState(PlayerState.PAUSED);
+    }
+
+    /**
+     * Stops any current chain and schedules gapless playback from global timeline position `timelineMs`.
+     * Requires chunk `findChunkIndex(timelineMs)` to already be decoded (caller awaits `ensureDecoded`).
+     */
+    private async beginPlaybackFrom(timelineMs: number): Promise<void> {
+        if (!this.songMeta || !this.gainNode) {
+            throw new Error("no song");
+        }
+        const gen = this.actionCounter;
+        this.stopAllSources();
+        const ctx = await this.resumeContext();
+
+        const chunks = this.songMeta.chunks;
+        const i = this.findChunkIndex(timelineMs);
+        const buf = this.decoded.get(i);
+        if (!buf) {
+            throw new Error("chunk not decoded");
+        }
+
+        const offSec = (timelineMs - chunks[i].start_ms) / 1000;
+        let safeOff = Math.max(0, offSec);
+        if (buf.duration > 0 && safeOff >= buf.duration) {
+            safeOff = Math.max(0, buf.duration - 1e-3);
+        }
+        let partDur = buf.duration - safeOff;
+        if (partDur <= 0) {
+            partDur = buf.duration;
+            safeOff = 0;
+        }
+
+        const when = ctx.currentTime;
+        const lead = ctx.createBufferSource();
+        lead.buffer = buf;
+        lead.connect(this.gainNode);
+        if (i === chunks.length - 1) {
+            lead.onended = () => {
+                if (gen !== this.actionCounter) {
+                    return;
+                }
+                this.handlePlaybackComplete();
+            };
+        }
+        lead.start(when, safeOff, partDur);
+        this.activeSources.push(lead);
+
+        this.playStartTimelineMs = timelineMs;
+        this.playStartCtxTime = when;
+        this.isAudioRunning = true;
+        this.playbackComplete = false;
+
+        this.scheduleTailCtxTime = when + partDur;
+        this.scheduleNextIdx = i + 1;
+
+        this.appendScheduledChain();
+        this.prefetchDecodeAhead(this.scheduleNextIdx, PREFETCH_CHUNK_COUNT);
     }
 
     /** Clamps a timeline position to `[0, song.duration_ms]`. */
@@ -162,11 +340,11 @@ export class Player {
     private findChunkIndex(positionMs: number): number {
         const chunks = this.songMeta!.chunks;
 
-        for (let i = 0; i < chunks.length; i++) {
-            const c = chunks[i];
+        for (let j = 0; j < chunks.length; j++) {
+            const c = chunks[j];
             const inRange = positionMs >= c.start_ms && positionMs < c.end_ms;
             if (inRange) {
-                return i;
+                return j;
             }
         }
 
@@ -176,10 +354,10 @@ export class Player {
             { positionMs },
         );
 
-        for (let i = chunks.length - 1; i >= 0; i--) {
-            const c = chunks[i];
+        for (let j = chunks.length - 1; j >= 0; j--) {
+            const c = chunks[j];
             if (positionMs >= c.start_ms) {
-                return i;
+                return j;
             }
         }
 
@@ -190,41 +368,28 @@ export class Player {
     }
 
     /**
-     * Seeks within the **already loaded** chunk: sets `audio.currentTime` to the offset that
-     * corresponds to `timelineMs` on the global timeline.
-     */
-    private applyOffsetInCurrentChunk(timelineMs: number) {
-        const chunk = this.songMeta!.chunks[this.chunkIndex];
-        const offsetSecRaw = (timelineMs - chunk.start_ms) / 1000;
-        let sec = Math.max(0, offsetSecRaw);
-
-        // avoiding aligning to the very last ms, which could trigger
-        // what browsers consider a "end of stream"
-        const d = this.audio.duration;
-        if (d > 0 && sec > 0 && sec >= d) {
-            sec -= 0.001
-        }
-
-        this.audio.currentTime = sec;
-        console.log(LOG_PREFIX, "applyOffsetInCurrentChunk", {
-            timelineMs,
-            chunkIndex: this.chunkIndex,
-            currentTimeSec: sec,
-            reportedDurationSec: d,
-        });
-    }
-
-    /**
      * Loads song metadata from `GET ${baseUrl}/songs/md` and resets playback state for a new track.
      */
     async load(): Promise<void> {
         this.actionCounter += 1;
         const ac = this.actionCounter;
-        this.audio.pause();
-        this.revokeUrl();
-        this.audio.removeAttribute("src");
-        this.chunkIndex = 0;
+
+        this.stopAllSources();
+        this.isAudioRunning = false;
+        this.clearDecodeCaches();
+
+        if (this.audioCtx) {
+            try {
+                await this.audioCtx.close();
+            } catch {
+                /* ignore */
+            }
+            this.audioCtx = null;
+            this.gainNode = null;
+        }
+
         this.playbackComplete = false;
+        this.pausedAtMs = 0;
         this.songMeta = null;
 
         console.log(LOG_PREFIX, "load: fetching metadata");
@@ -259,7 +424,7 @@ export class Player {
 
     /**
      * Returns the current global timeline position in ms for UI (e.g. progress bar),
-     * using chunk `start_ms` plus the element’s `currentTime` within the loaded blob.
+     * using the Web Audio clock while playing and `pausedAtMs` while paused.
      */
     getCurrentTimeMs(): number {
         if (!this.songMeta) {
@@ -268,22 +433,17 @@ export class Player {
         if (this.playbackComplete) {
             return this.songMeta.duration_ms;
         }
-        const chunks = this.songMeta.chunks;
-        if (this.chunkIndex < 0 || this.chunkIndex >= chunks.length) {
-            return 0;
+        if (this.isAudioRunning && this.audioCtx && this.audioCtx.state === "running") {
+            const t =
+                this.playStartTimelineMs + (this.audioCtx.currentTime - this.playStartCtxTime) * 1000;
+            return this.clampTimelineMs(t);
         }
-        const base = chunks[this.chunkIndex].start_ms;
-        const t = this.audio.currentTime;
-        if (!Number.isFinite(t)) {
-            return this.clampTimelineMs(base);
-        }
-        const combined = base + t * 1000;
-        return this.clampTimelineMs(combined);
+        return this.clampTimelineMs(this.pausedAtMs);
     }
 
     /**
-     * Seeks to `positionMs` on the song timeline: may fetch a different chunk and sets offset
-     * within that chunk. Preserves play/pause (was playing → still playing after seek).
+     * Seeks to `positionMs` on the song timeline. Decodes the target chunk (and kicks off
+     * decode-ahead) so `play()` can start immediately afterward. Preserves play/pause.
      */
     async seek(positionMs: number): Promise<void> {
         if (!this.songMeta) {
@@ -292,41 +452,34 @@ export class Player {
         }
         this.actionCounter += 1;
         const gen = this.actionCounter;
-        const wasPlaying = !this.audio.paused;
+        const wasPlaying = this.isAudioRunning;
         const ms = this.clampTimelineMs(positionMs);
         this.playbackComplete = false;
         const i = this.findChunkIndex(ms);
 
         console.log(LOG_PREFIX, "seek", { requested: positionMs, clamped: ms, chunkIndex: i });
 
-        try {
-            const sameChunkLoaded =
-                this.chunkIndex === i && Boolean(this.objectUrl && this.audio.src);
-
-            if (sameChunkLoaded) {
-                this.applyOffsetInCurrentChunk(ms);
-                if (gen !== this.actionCounter) {
-                    return;
-                }
-                if (wasPlaying) {
-                    await this.audio.play();
-                    if (gen !== this.actionCounter) {
-                        return;
-                    }
-                    this.setState(PlayerState.PLAYING);
-                } else {
-                    this.setState(PlayerState.PAUSED);
-                }
-                return;
+        this.stopAllSources();
+        this.isAudioRunning = false;
+        if (this.audioCtx && this.audioCtx.state === "running") {
+            try {
+                await this.audioCtx.suspend();
+            } catch {
+                /* ignore */
             }
+        }
 
-            await this.prepareChunk(i);
+        this.pausedAtMs = ms;
+
+        try {
+            await this.ensureDecodedPairForStart(i);
             if (gen !== this.actionCounter) {
                 return;
             }
-            this.applyOffsetInCurrentChunk(ms);
+            this.prefetchDecodeAhead(i + 2, PREFETCH_CHUNK_COUNT);
+
             if (wasPlaying) {
-                await this.audio.play();
+                await this.beginPlaybackFrom(ms);
                 if (gen !== this.actionCounter) {
                     return;
                 }
@@ -335,7 +488,7 @@ export class Player {
                 this.setState(PlayerState.PAUSED);
             }
         } catch (e) {
-            if (gen !== this.actionCounter) {
+            if (gen !== this.actionCounter || isAbortError(e)) {
                 return;
             }
             this.setState(PlayerState.ERROR);
@@ -348,35 +501,43 @@ export class Player {
     }
 
     /**
-     * Starts or resumes playback; loads the current chunk’s blob first if `audio` has no source.
+     * Starts or resumes playback. Decodes the chunk at the current timeline (if needed),
+     * then schedules gapless audio from that position. Decode-ahead starts as soon as the
+     * first chunk is ready.
      */
     async play(): Promise<void> {
         if (!this.isLoaded()) {
-            console.log(LOG_PREFIX, "cannot play: not loaded")
-            return
+            console.log(LOG_PREFIX, "cannot play: not loaded");
+            return;
         }
-        if (this._state == PlayerState.ERROR) {
-            console.log(LOG_PREFIX, "cannot play: ERR")
-            return
+        if (this._state === PlayerState.ERROR) {
+            console.log(LOG_PREFIX, "cannot play: ERR");
+            return;
+        }
+        if (this.isAudioRunning && this._state === PlayerState.PLAYING) {
+            return;
         }
         const gen = this.actionCounter;
         this.playbackComplete = false;
 
+        const timelineMs = this.getCurrentTimeMs();
+
         try {
-            if (!this.audio.src || !this.objectUrl) {
-                await this.prepareChunk(this.chunkIndex);
-                if (gen !== this.actionCounter) {
-                    return;
-                }
+            const i = this.findChunkIndex(timelineMs);
+            await this.ensureDecodedPairForStart(i);
+            if (gen !== this.actionCounter) {
+                return;
             }
-            await this.audio.play();
+            this.prefetchDecodeAhead(i + 2, PREFETCH_CHUNK_COUNT);
+
+            await this.beginPlaybackFrom(timelineMs);
             if (gen !== this.actionCounter) {
                 return;
             }
             this.setState(PlayerState.PLAYING);
             console.log(LOG_PREFIX, "play: playing");
         } catch (e) {
-            if (gen !== this.actionCounter) {
+            if (gen !== this.actionCounter || isAbortError(e)) {
                 return;
             }
             this.setState(PlayerState.ERROR);
@@ -386,7 +547,16 @@ export class Player {
 
     /** Pauses playback and updates state when we were `playing`. */
     pause(): void {
-        this.audio.pause();
+        if (!this.audioCtx) {
+            return;
+        }
+        if (this.isAudioRunning) {
+            const t = this.playStartTimelineMs + (this.audioCtx.currentTime - this.playStartCtxTime) * 1000;
+            this.pausedAtMs = this.clampTimelineMs(t);
+        }
+        this.stopAllSources();
+        this.isAudioRunning = false;
+        void this.audioCtx.suspend().catch(() => {});
         if (this._state === PlayerState.PLAYING) {
             this.setState(PlayerState.PAUSED);
         }
@@ -394,62 +564,19 @@ export class Player {
     }
 
     /**
-     * When a chunk finishes naturally, loads the next chunk and continues playing; on the last
-     * chunk, clears the source and marks playback complete for timeline reporting.
-     */
-    private async handleEnded() {
-        if (!this.songMeta) {
-            return;
-        }
-        const ac = this.actionCounter;
-        const next = this.chunkIndex + 1;
-        if (next >= this.songMeta.chunks.length) {
-            console.log(LOG_PREFIX, "handleEnded: song complete");
-            this.playbackComplete = true;
-            this.chunkIndex = 0;
-            this.revokeUrl();
-            this.audio.removeAttribute("src");
-            if (ac !== this.actionCounter) {
-                return;
-            }
-            this.setState(PlayerState.PAUSED);
-            return;
-        }
-
-        try {
-            console.log(LOG_PREFIX, "handleEnded: advancing chunk", { from: this.chunkIndex, to: next });
-            await this.prepareChunk(next);
-            if (ac !== this.actionCounter) {
-                return;
-            }
-            await this.audio.play();
-            if (ac !== this.actionCounter) {
-                return;
-            }
-            this.setState(PlayerState.PLAYING);
-        } catch (e) {
-            if (ac !== this.actionCounter) {
-                return;
-            }
-            this.setState(PlayerState.ERROR);
-            console.warn(LOG_PREFIX, "handleEnded: error", e);
-        }
-    }
-
-    /**
      * Tears down listeners and revokes blob URLs. Do not use this instance after calling.
      */
     destroy(): void {
         this.actionCounter += 1;
-        this.audio.removeEventListener("ended", this.onAudioEnded);
-        this.audio.removeEventListener("error", this.onAudioError);
-        this.audio.pause();
-        this.audio.removeAttribute("src");
-        this.revokeUrl();
+        this.stopAllSources();
+        this.isAudioRunning = false;
+        this.clearDecodeCaches();
+        void this.audioCtx?.close().catch(() => {});
+        this.audioCtx = null;
+        this.gainNode = null;
         this.songMeta = null;
         this.playbackComplete = false;
-        this.chunkIndex = 0;
-        this.loaded = false;
+        this.pausedAtMs = 0;
         console.log(LOG_PREFIX, "destroy");
     }
 }

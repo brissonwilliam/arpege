@@ -59,6 +59,18 @@ pub async fn get_song_md() -> axum::response::Response {
                 end_ms: 30000 + 10007,
                 duration_ms: 10007,
             },
+            ChunkMeta {
+                id: "out_004.m4a".to_owned(),
+                start_ms: 30000,
+                end_ms: 30000 + 10007,
+                duration_ms: 10007,
+            },
+            ChunkMeta {
+                id: "out_005.m4a".to_owned(),
+                start_ms: 50015,
+                end_ms: 50015 + 9984,
+                duration_ms: 9984,
+            },
         ],
     };
     let song_json = serde_json::to_vec(&song).unwrap(); // TODO: #yolo
