@@ -27,7 +27,7 @@
     </div>
     <div class="w-3/12">
         <div class="ml-5 w-2/6">
-            <button class="window-pill theme-toggle" on:click={toggleMinui}> Minui </button>
+            <button class="window-pill border-none theme-toggle" on:click={toggleMinui}> Minui </button>
         </div>
     </div>
 </div>
