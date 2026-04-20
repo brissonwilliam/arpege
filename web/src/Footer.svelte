@@ -5,11 +5,14 @@
 
     const p = new Player();
 
-    const POLL_MS = 250;
+    const POLL_MS = 500;
 
     let isPlaying = false;
     let currentMs = 0;
     let durationMs = 0;
+    let songTitle = "";
+    let songArtist = "";
+    let gainPercent = 100;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
 
     function formatMmSs(totalSeconds: number): string {
@@ -23,6 +26,12 @@
         currentMs = p.getCurrentTimeMs();
         durationMs = p.meta?.duration_ms ?? 0;
         isPlaying = p.isPlaying;
+        songTitle = p.meta?.title ?? "";
+        songArtist = p.meta?.artist ?? "";
+    }
+
+    function onGainInput() {
+        p.setGainPercent(gainPercent);
     }
 
     function onProgressClick(e: MouseEvent & { currentTarget: HTMLElement }) {
@@ -40,6 +49,7 @@
 
     onMount(async () => {
         await p.load();
+        gainPercent = p.gainPercent;
         refreshFromPlayer();
         pollTimer = setInterval(refreshFromPlayer, POLL_MS);
     });
@@ -73,11 +83,25 @@
 
 <div class="footer">
     <div class="player">
-        <div class="w-2/10 text-xs">
-            <p>Now playing (nice icon + song name)</p>
+        <div class="flex w-2/10 min-w-0 items-center gap-2 text-xs">
+            <!-- NOW PLAYING -->
+            <div class="min-w-0 text-lg flex flex-col gap-0.5">
+                <span
+                    class="truncate font-medium text-neutral-900 dark:text-neutral-100"
+                    title={songTitle || undefined}>{songTitle || "—"}</span
+                >
+                {#if songArtist}
+                    <div>
+                        <span class="text-neutral-300" title={songArtist}
+                            >{songArtist}</span
+                        >
+                    </div>
+                {/if}
+            </div>
         </div>
         <div class="w-8/12">
-            <div class="flex justify-center lg:gap-7 gap-3">
+            <!-- CONTROL BUTTONS -->
+            <div class="flex justify-center mt-2 lg:gap-7 gap-3">
                 <div class="player-btn start-btn"></div>
                 <button
                     on:click={togglePlayPause}
@@ -89,9 +113,9 @@
                 </button>
                 <div class="player-btn end-btn"></div>
             </div>
-            <div class="mt-3 flex items-center gap-2 text-xs">
-                <span
-                    class="shrink-0 tabular-nums text-neutral-500 dark:text-neutral-400"
+            <!-- PROGRESS BAR -->
+            <div class="mt-1 flex items-center gap-2 text-xs">
+                <span class="shrink-0 tabular-nums text-neutral-500"
                     >{formatMmSs(currentMs / 1000)}</span
                 >
                 <div
@@ -100,10 +124,10 @@
                     role="presentation"
                 >
                     <div
-                        class="progress-track h-2 w-full rounded-full bg-neutral-200 dark:bg-neutral-700"
+                        class="progress-track h-2 w-full rounded-full bg-neutral-700"
                     >
                         <div
-                            class="progress-fill h-full rounded-full bg-neutral-600 dark:bg-neutral-300"
+                            class="progress-fill h-full rounded-full bg-neutral-300"
                             style="width: {durationMs > 0
                                 ? Math.min(100, (currentMs / durationMs) * 100)
                                 : 0}%"
@@ -116,8 +140,42 @@
                 >
             </div>
         </div>
-        <div class="w-2/10 text-xs text-right">
-            <p>Volume and shite</p>
+        <div
+            class="mt-4 flex w-2/10 min-w-0 flex-col items-end justify-center gap-1 text-xs"
+        >
+            <label class="flex w-full max-w-[11rem] items-center gap-2">
+                <span
+                    class="shrink-0 text-neutral-500 dark:text-neutral-400"
+                    aria-hidden="true"
+                >
+                    {#if gainPercent > 60}
+                        <!-- prettier-ignore -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M20.803 8a40.5 40.5 0 0 1 0 8"/><path stroke-linejoin="round" d="M13 12c0-1.884-.163-3.73-.475-5.525c-.123-.704-.937-1.019-1.52-.605L8.52 7.632A2 2 0 0 1 7.363 8H5a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h2.363a2 2 0 0 1 1.157.368l2.485 1.762c.583.414 1.397.1 1.52-.605A32 32 0 0 0 13 12Z"/><path stroke-linecap="round" d="M16.877 9a36.5 36.5 0 0 1 0 6"/></g></svg>
+                    {:else if gainPercent > 0}
+                        <!-- prettier-ignore -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><path stroke-linejoin="round" d="M13 12c0-1.884-.163-3.73-.475-5.525c-.123-.704-.937-1.019-1.52-.605L8.52 7.632A2 2 0 0 1 7.363 8H5a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h2.363a2 2 0 0 1 1.157.368l2.485 1.762c.583.414 1.397.1 1.52-.605A32 32 0 0 0 13 12Z"/><path stroke-linecap="round" d="M16.877 9a36.5 36.5 0 0 1 0 6"/></g></svg>
+                    {:else}
+                        <!-- prettier-ignore -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"><path d="M13 12c0-1.884-.163-3.73-.475-5.525c-.123-.704-.937-1.019-1.52-.605L8.52 7.632A2 2 0 0 1 7.363 8H5a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h2.363a2 2 0 0 1 1.157.368l2.485 1.762c.583.414 1.397.1 1.52-.605A32 32 0 0 0 13 12Z"/><path stroke-linecap="round" d="m17 10l4 4m-4 0l4-4"/></g></svg>
+                    {/if}
+                </span>
+                <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    bind:value={gainPercent}
+                    on:input={onGainInput}
+                    class="h-1.5 w-full min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-neutral-200 dark:bg-neutral-700 accent-neutral-600 dark:accent-neutral-300"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow={gainPercent}
+                    aria-label="Volume"
+                />
+            </label>
+            <span
+                class="tabular-nums text-neutral-500 dark:text-neutral-400"
+                aria-hidden="true">{gainPercent}%</span
+            >
         </div>
     </div>
 </div>
@@ -152,8 +210,8 @@
     }
 
     .play-btn {
-        width: 2.8rem;
-        height: 2.8rem;
+        width: 2.5rem;
+        height: 2.5rem;
         --svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%23000' stroke-linejoin='round' stroke-width='2.5' d='M19 10.268c1.333.77 1.333 2.694 0 3.464l-9 5.196c-1.333.77-3-.192-3-1.732V6.804c0-1.54 1.667-2.502 3-1.732z'/%3E%3C/svg%3E");
         -webkit-mask-image: var(--svg);
         mask-image: var(--svg);
@@ -165,8 +223,8 @@
     }
 
     .pause-btn {
-        width: 2.8rem;
-        height: 2.8rem;
+        width: 2.5rem;
+        height: 2.5rem;
         --svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%23000' stroke-linejoin='round' stroke-width='2' d='M5 7a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2zm9 0a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2z'/%3E%3C/svg%3E");
         -webkit-mask-image: var(--svg);
         mask-image: var(--svg);

@@ -30,6 +30,8 @@ export class Player {
 
     private audioCtx: AudioContext | null = null;
     private gainNode: GainNode | null = null;
+    /** Output level 0–100 (linear), applied to `gainNode` when the context exists. */
+    private _gainPercent = 100;
 
     private decoded = new Map<number, AudioBuffer>();
     private decoding = new Map<number, Promise<AudioBuffer>>();
@@ -69,6 +71,24 @@ export class Player {
         return this.isAudioRunning;
     }
 
+    /** Playback volume 0–100 (linear, maps to `GainNode.gain`). */
+    get gainPercent(): number {
+        return this._gainPercent;
+    }
+
+    /** Sets playback volume 0–100 (linear). Safe to call before the first `play()`. */
+    setGainPercent(percent: number): void {
+        const p = Math.max(0, Math.min(100, Math.round(percent)));
+        this._gainPercent = p;
+        this.applyGainToNode();
+    }
+
+    private applyGainToNode(): void {
+        if (this.gainNode) {
+            this.gainNode.gain.value = this._gainPercent / 100;
+        }
+    }
+
     /** Updates internal state (used by async paths and audio events). */
     private setState(s: PlayerState) {
         this._state = s;
@@ -101,6 +121,7 @@ export class Player {
             }
             this.audioCtx = new Ctor();
             this.gainNode = this.audioCtx.createGain();
+            this.applyGainToNode();
             this.gainNode.connect(this.audioCtx.destination);
         }
         return this.audioCtx;
