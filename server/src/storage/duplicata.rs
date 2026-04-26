@@ -57,24 +57,24 @@ pub fn tokenize(s: &String) -> Vec<String> {
 
 pub struct FindMetaCriteria {
     pub title: String,
-    pub artists: Vec<String>,
-    pub duration_ms: Option<u32>,
+    pub artists: String,
+    pub duration_ms: u32,
     pub title_tokens: Vec<String>,
     pub artist_tokens: Vec<String>,
     pub album_tokens: Vec<String>,
 }
 
 impl FindMetaCriteria {
-    pub fn new(title: String, duration_ms: Option<u32>, artists: Vec<String>) -> Self {
+    pub fn new(title: String, duration_ms: u32, artists: String, album: String) -> Self {
         let title_norm = normalize_title(title.as_str());
-        let title_tokens = tokenize(&title_norm);
+        let title_tokens = tokenize(&title_norm); // cannot initialize inline, title_norm would be
+                                                  // borrowed by other field
 
-        let mut artist_tokens = Vec::new();
-        for a in artists.iter() {
-            let norm = normalize_str(a.as_str());
-            let toks = tokenize(&norm);
-            artist_tokens.extend(toks);
-        }
+        let artist_norm = normalize_str(artists.as_str());
+        let artist_tokens = tokenize(&artist_norm);
+
+        let album_norm = normalize_str(album.as_str());
+        let album_tokens = tokenize(&album_norm);
 
         return FindMetaCriteria {
             title: title_norm,
@@ -82,7 +82,7 @@ impl FindMetaCriteria {
             artists: artists,
             title_tokens: title_tokens,
             artist_tokens: artist_tokens,
-            album_tokens: vec![],
+            album_tokens: album_tokens,
         };
     }
 }
@@ -183,12 +183,12 @@ impl storage::Storage {
         }
 
         // duration filter
-        if let Some(duration_ms) = criteria.duration_ms {
+        if criteria.duration_ms > 0 {
             qb.push(" AND duration_ms BETWEEN ");
             let delta_duration = 5000;
-            qb.push_bind(duration_ms - delta_duration);
+            qb.push_bind(criteria.duration_ms - delta_duration);
             qb.push(" AND ");
-            qb.push_bind(duration_ms + delta_duration);
+            qb.push_bind(criteria.duration_ms + delta_duration);
         }
 
         let res: Result<Vec<MetaMatch>, sqlx::error::Error> =
@@ -212,7 +212,7 @@ fn prune_by_weight(criteria: FindMetaCriteria, mut candidates: Vec<MetaMatch>) {
 
     for c in candidates.iter_mut() {
         let mut score = TITLE_WEIGHT;
-        if let Some(_) = criteria.duration_ms {
+        if criteria.duration_ms > 0 {
             score += DURATION_WEIGHT;
         }
         if criteria.artist_tokens.len() > 0 {

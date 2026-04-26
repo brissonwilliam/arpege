@@ -26,29 +26,50 @@ impl ProcessorJob {
         let path = self.path.as_str();
         log::info!("processing {}", path);
 
-        let probemd = match processor::probe::probe(path) {
+        let mut probemd = match processor::probe::probe(path) {
             Ok(probemd) => probemd,
             Err(err) => {
                 log::error!("could not probe {}", path);
                 return false;
             }
         };
+        log::debug!("probed {:?}", probemd);
 
-        // TODO: parse to another db storage struct
         if probemd.streams.len() < 1 {
             log::error!("no streams on {}, cannot process", path);
             return false;
         }
+        let stream = probemd.streams.swap_remove(0); // take ownership of first stream value without
+                                                     // offsetting / resizing the whole thing
 
-        // TODO: Query db, skip if exists
-        store.get_duplicates(storage::PruneDuplicataCriteria {
-            title: (),
-            artists: (),
-            duration_ms: (),
-            title_tokens: (),
-            artist_tokens: (),
-            album_tokens: (),
-        });
+        if probemd.format.tags.is_none() {
+            log::error!("no format.tags on {}, cannot process", path);
+            return false;
+        }
+        let tags = probemd.format.tags.unwrap();
+
+        // Query db, skip if exists
+        let dur = stream
+            .duration
+            .unwrap_or("".to_owned())
+            .parse::<u32>()
+            .unwrap_or(0);
+
+        let c = storage::FindMetaCriteria::new(
+            tags.title.unwrap_or("".to_owned()),
+            dur,
+            tags.artist.unwrap_or("".to_owned()),
+            tags.album.unwrap_or("".to_owned()),
+        );
+        let matches = match store.find_meta(c).await {
+            Ok(v) => v,
+            Err(err) => {
+                log::error!("error finding meta match for import: {:?}", err);
+                return false;
+            }
+        };
+
+        // TODO: maybe add a force reimport config
 
         // TODO: use internal db struct instead
 
