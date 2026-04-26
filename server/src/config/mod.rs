@@ -7,6 +7,7 @@ pub struct Config {
     pub transcode_bitrate_kbs: u32, // fmpeg arg for transcode bitrate
     pub transcode_codec: String,    // [aac,mp3,flac,opus,wav,alac]
     pub transcode_enabled: bool,
+    pub data_dir: String,
 }
 
 impl Default for Config {
@@ -15,6 +16,7 @@ impl Default for Config {
             transcode_bitrate_kbs: 192,
             transcode_codec: String::from("aac"),
             transcode_enabled: true,
+            data_dir: "./data".to_owned(),
         }
     }
 }

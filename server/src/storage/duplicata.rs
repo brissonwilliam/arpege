@@ -1,7 +1,5 @@
-use std::time::Duration;
-
 use crate::storage::storage;
-use sqlx::{Execute, FromRow, QueryBuilder, Sqlite};
+use sqlx::{FromRow, QueryBuilder, Sqlite};
 
 pub fn normalize_str(s: &str) -> String {
     let mut norm = String::from(s);
@@ -57,7 +55,7 @@ pub fn tokenize(s: &String) -> Vec<String> {
     return ret;
 }
 
-pub struct PruneDuplicataCriteria {
+pub struct FindMetaCriteria {
     pub title: String,
     pub artists: Vec<String>,
     pub duration_ms: Option<u32>,
@@ -66,7 +64,7 @@ pub struct PruneDuplicataCriteria {
     pub album_tokens: Vec<String>,
 }
 
-impl PruneDuplicataCriteria {
+impl FindMetaCriteria {
     pub fn new(title: String, duration_ms: Option<u32>, artists: Vec<String>) -> Self {
         let title_norm = normalize_title(title.as_str());
         let title_tokens = tokenize(&title_norm);
@@ -78,7 +76,7 @@ impl PruneDuplicataCriteria {
             artist_tokens.extend(toks);
         }
 
-        return PruneDuplicataCriteria {
+        return FindMetaCriteria {
             title: title_norm,
             duration_ms: duration_ms,
             artists: artists,
@@ -90,30 +88,79 @@ impl PruneDuplicataCriteria {
 }
 
 #[derive(Debug, FromRow)]
-pub struct DuplicataCandidate {
-    pub id: [u8; 16],
+pub struct MetaMatch {
+    pub id: Vec<u8>,
     pub title: String,
     pub weight: u8,
 }
 
 impl storage::Storage {
-    pub async fn get_duplicates(
+    pub async fn search_meta(&self, mut search: String) -> Result<Vec<MetaMatch>, sqlx::Error> {
+        if search.len() < 3 {
+            log::debug!("search_meta input too small");
+            return Ok(vec![]);
+        }
+
+        const MAX_INPUT_LEN: usize = 1024;
+        search.truncate(MAX_INPUT_LEN);
+        let tokens = tokenize(&search);
+
+        // with t(tok) AS (values('a'), ('b')) select * from t
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+            r#"
+            WITH input(token) AS (
+                VALUES
+            "#,
+        );
+
+        let mut qsep = qb.separated(",");
+        for t in tokens.iter() {
+            qsep.push_unseparated("(");
+            qsep.push_bind_unseparated(t);
+            qsep.push(")");
+        }
+        qb.push(")");
+
+        qb.push(
+            r#"
+            SELECT id, title FROM song 
+            WHERE id IN (
+                SELECT song_id FROM song_token WHERE token IN (SELECT * FROM input)
+            ) OR artist_id in (
+                SELECT artist_id FROM artist_token WHERE token IN (SELECT * FROM input)
+            ) OR album_id in (
+                SELECT album_id FROM album_token WHERE token IN (SELECT * FROM input)
+            )
+            "#,
+        );
+
+        let res: Result<Vec<MetaMatch>, sqlx::error::Error> =
+            qb.build_query_as::<MetaMatch>().fetch_all(&self.pool).await;
+
+        return res;
+    }
+
+    // finds MetaMatch based on an additive set of criteria (AND...)
+    pub async fn find_meta(
         &self,
-        criteria: PruneDuplicataCriteria,
-    ) -> Result<Vec<DuplicataCandidate>, sqlx::Error> {
+        criteria: FindMetaCriteria,
+    ) -> Result<Vec<MetaMatch>, sqlx::Error> {
         let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
             r#"
             SELECT id, title FROM song 
-            WHERE id IN (SELECT song_id FROM song_token WHERE token IN (
+            WHERE 1 
         "#,
         );
 
         // song_token filter
-        let mut qsep = qb.separated(",");
-        for t in criteria.title_tokens.iter() {
-            qsep.push_bind(t.as_str());
+        if criteria.title_tokens.len() > 0 {
+            qb.push(" AND id IN (SELECT song_id FROM song_token WHERE token IN (");
+            let mut qsep = qb.separated(",");
+            for t in criteria.title_tokens.iter() {
+                qsep.push_bind(t.as_str());
+            }
+            qsep.push_unseparated("))");
         }
-        qsep.push_unseparated("))");
 
         // artist_token filter
         if criteria.artist_tokens.len() > 0 {
@@ -144,16 +191,14 @@ impl storage::Storage {
             qb.push_bind(duration_ms + delta_duration);
         }
 
-        let res = qb
-            .build_query_as::<DuplicataCandidate>()
-            .fetch_all(&self.pool)
-            .await;
+        let res: Result<Vec<MetaMatch>, sqlx::error::Error> =
+            qb.build_query_as::<MetaMatch>().fetch_all(&self.pool).await;
 
         return res;
     }
 }
 
-fn prune_by_weight(criteria: PruneDuplicataCriteria, mut candidates: Vec<DuplicataCandidate>) {
+fn prune_by_weight(criteria: FindMetaCriteria, mut candidates: Vec<MetaMatch>) {
     // Weights is a number that gives an idea of how much metadata
     // was actually matched depending on the request input
     // It is not used to give a match score, but rahter to compare candidates within
