@@ -1,90 +1,130 @@
 use crate::processor;
 use crate::processor::probe::ProbeData;
 use crate::{config, storage};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Sender};
 use std::thread;
 
 #[derive(Debug)]
 pub struct ProcessorJob {
     pub path: String,
-    pub override_existing: bool,
+}
+
+pub struct JobResult {
+    remove_import: bool,
+    matches: usize,
+    transcoded: bool,
+}
+
+fn job_result_abort() -> JobResult {
+    return JobResult {
+        remove_import: false,
+        transcoded: false,
+        matches: 0,
+    };
 }
 
 impl ProcessorJob {
-    pub fn process(&self, store: &storage::Storage) {
+    async fn process(&self, store: &storage::Storage) {
         let start = std::time::Instant::now();
 
-        let p = &self.path;
-        self.do_process(store);
-        self.move_import();
+        let jr = self.do_process(store).await;
+        if jr.remove_import {
+            self.move_import();
+        }
 
         log::info!("processed in {}ms", start.elapsed().as_millis());
     }
 
-    // processes the job and returns a bool indicate whether or not everything happened as expected
-    fn do_process(&self, store: &storage::Storage) -> bool {
+    // TODO: maybe add a force reimport config
+    async fn do_process(&self, store: &storage::Storage) -> JobResult {
         let path = self.path.as_str();
         log::info!("processing {}", path);
 
+        // Probe
         let mut probemd = match processor::probe::probe(path) {
             Ok(probemd) => probemd,
             Err(err) => {
-                log::error!("could not probe {}", path);
-                return false;
+                log::error!("could not probe {} because err: {}", path, err.to_string());
+                return job_result_abort();
             }
         };
         log::debug!("probed {:?}", probemd);
 
+        // Query db, skip if exists
+        let c = match self.new_db_match_criteria(path, &mut probemd) {
+            Some(c) => c,
+            None => return job_result_abort(),
+        };
+        let matches = match store.find_meta(c).await {
+            Ok(m) => m,
+            Err(err) => {
+                log::error!("error finding meta match for import: {:?}", err);
+                return job_result_abort();
+            }
+        };
+        log::debug!("found {} db matches", matches.len());
+
+        let mut jr = JobResult {
+            remove_import: matches.len() > 0,
+            transcoded: false,
+            matches: matches.len(),
+        };
+
+        // Transcode (maybe)
+        match self.transcode(path, &probemd) {
+            Some(did_transcode) => jr.transcoded = did_transcode,
+            None => return job_result_abort(),
+        };
+
+        return jr;
+    }
+
+    fn new_db_match_criteria(
+        &self,
+        path: &str,
+        probemd: &mut ProbeData,
+    ) -> Option<storage::FindMetaCriteria> {
+        // take ownership of first stream value without offsetting / resizing the whole thing
+        // TODO: maybe pick the best audio stream ?
         if probemd.streams.len() < 1 {
             log::error!("no streams on {}, cannot process", path);
-            return false;
+            return None;
         }
-        let stream = probemd.streams.swap_remove(0); // take ownership of first stream value without
-                                                     // offsetting / resizing the whole thing
-
-        if probemd.format.tags.is_none() {
-            log::error!("no format.tags on {}, cannot process", path);
-            return false;
-        }
-        let tags = probemd.format.tags.unwrap();
-
-        // Query db, skip if exists
-        let dur = stream
+        let probestream = probemd.streams.swap_remove(0);
+        let dur = probestream
             .duration
             .unwrap_or("".to_owned())
             .parse::<u32>()
             .unwrap_or(0);
 
-        let c = storage::FindMetaCriteria::new(
-            tags.title.unwrap_or("".to_owned()),
-            dur,
-            tags.artist.unwrap_or("".to_owned()),
-            tags.album.unwrap_or("".to_owned()),
-        );
-        let matches = match store.find_meta(c).await {
-            Ok(v) => v,
-            Err(err) => {
-                log::error!("error finding meta match for import: {:?}", err);
-                return false;
-            }
-        };
+        if probemd.format.tags.is_none() {
+            log::error!("no format.tags on {}, cannot process", path);
+            return None;
+        }
 
-        // TODO: maybe add a force reimport config
+        let tags = probemd.format.tags.as_ref().unwrap();
+        // as_deref() converts Option<string> on tag fields to Option<&str>
+        let title = tags.title.as_deref().unwrap_or("").to_owned();
+        let artist = tags.artist.as_deref().unwrap_or("").to_owned();
+        let album = tags.artist.as_deref().unwrap_or("").to_owned();
 
-        // TODO: use internal db struct instead
+        let c = storage::FindMetaCriteria::new(title, dur, artist, album);
+        return Some(c);
+    }
 
+    fn transcode(&self, path: &str, probemd: &ProbeData) -> Option<bool> {
         // ###### Precheck Transcode ###############
         let cfg = config::get();
         if !cfg.transcode_enabled {
             log::info!("transcode disabled, skipping {}", path);
-            return true;
+            return Some(false);
         }
 
         let brate_str = match &probemd.format.bit_rate {
             Some(c) => c,
             None => {
                 log::error!("undefined bitrate on {}", probemd.format.filename);
-                return false;
+                return None;
             }
         };
         let brate_kbs: u64 = brate_str.parse().unwrap_or(u64::MAX) / 1024;
@@ -97,28 +137,23 @@ impl ProcessorJob {
                     "could not find codec on audio stream for {}",
                     probemd.format.filename
                 );
-                return false;
+                return None;
             }
         };
         let same_codec = cfg.transcode_codec == (*codec).to_lowercase().trim();
 
         if same_codec && brate_kbs <= cfg.transcode_bitrate_kbs as u64 {
             log::info!("bitrate & codec already match, skipping {}", path);
-            return true;
+            return Some(false);
         };
 
-        // ########### Transcode ##############
         match processor::transcode::transcode(path) {
-            Ok(_) => (),
+            Ok(_) => Some(true),
             Err(err) => {
-                log::error!("error transcoding {}", path);
-                return false;
+                log::error!("error transcoding {}. err: {}", path, err.to_string());
+                return None;
             }
         }
-
-        // TODO: ###### Store meta in db #########
-
-        return true;
     }
 
     pub fn move_import(&self) {
@@ -181,9 +216,9 @@ impl Processor {
 
         self.sender = Some(tx);
 
-        thread::spawn(move || {
+        tokio::task::spawn(async move {
             for job in rx {
-                job.process(&clone);
+                job.process(&clone).await;
             }
         });
     }

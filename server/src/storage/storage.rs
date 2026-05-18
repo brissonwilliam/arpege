@@ -6,7 +6,7 @@ use sqlx;
 use std;
 use std::fs::OpenOptions;
 
-pub async fn get_pool() -> Result<sqlx::Pool<sqlx::Sqlite>, Box<dyn std::error::Error>> {
+pub async fn new_pool() -> Result<sqlx::Pool<sqlx::Sqlite>, Box<dyn std::error::Error>> {
     log::info!("initializing storage");
     const DB_FILE: &str = "data/aperge.db";
     OpenOptions::new().write(true).create(true).open(DB_FILE)?;

@@ -17,8 +17,17 @@ struct Args {
     count: u8,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            start().await;
+        })
+}
+
+async fn start() {
     // initialize logger
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -31,7 +40,7 @@ async fn main() {
     let _ = config::get(); // calling get() to run the singleton that reads and loads the config to
                            // validate before we start doing other stuff
 
-    let pool = storage::get_pool().await.unwrap_or_else(|err| {
+    let pool = storage::new_pool().await.unwrap_or_else(|err| {
         log::error!("FATAL could not initialize db pool: {}", err.to_string());
         std::process::exit(-1);
     });
@@ -42,7 +51,6 @@ async fn main() {
 
     processor.push(processor::ProcessorJob {
         path: String::from("./data/import/ato.m4a"),
-        override_existing: false,
     });
 
     rest::start().await;
