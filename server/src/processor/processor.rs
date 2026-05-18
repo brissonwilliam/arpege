@@ -36,6 +36,7 @@ impl ProcessorJob {
     }
 
     // TODO: maybe add a force reimport config
+    // TODO: process input images. Generate different resolutions
     async fn do_process(&self, store: &storage::Storage) -> JobResult {
         let path = self.path.as_str();
         log::info!("processing {}", path);
@@ -65,10 +66,22 @@ impl ProcessorJob {
         log::debug!("found {} db matches", matches.len());
 
         let mut jr = JobResult {
-            remove_import: matches.len() > 0,
+            remove_import: true,
             transcoded: false,
             matches: matches.len(),
         };
+
+        if matches.len() > 0 {
+            let cfg = config::get();
+            if !cfg.duplicates_reimport {
+                log::info!("{path} already exists in library. Skipping (consider duplicates_reimport config)");
+                return jr
+            } 
+            log::info!("{path} already exists in library. Will re-importing (consider duplicates_reimport config)")
+        } else {
+            write new entry to db!!!
+            log::info!("Adding {path} to db");
+        }
 
         // Transcode (maybe)
         match self.transcode(path, &probemd) {

@@ -8,7 +8,7 @@ use std::fs::OpenOptions;
 
 pub async fn new_pool() -> Result<sqlx::Pool<sqlx::Sqlite>, Box<dyn std::error::Error>> {
     log::info!("initializing storage");
-    const DB_FILE: &str = "data/aperge.db";
+    const DB_FILE: &str = "data/arperge.db";
     OpenOptions::new().write(true).create(true).open(DB_FILE)?;
 
     log::info!("connecting to database file");

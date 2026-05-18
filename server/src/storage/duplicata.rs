@@ -191,14 +191,18 @@ impl storage::Storage {
             qb.push_bind(criteria.duration_ms + delta_duration);
         }
 
-        let res: Result<Vec<MetaMatch>, sqlx::error::Error> =
-            qb.build_query_as::<MetaMatch>().fetch_all(&self.pool).await;
+        let mut matches = qb
+            .build_query_as::<MetaMatch>()
+            .fetch_all(&self.pool)
+            .await?;
 
-        return res;
+        prune_by_weight(criteria, &mut matches);
+
+        return Ok(matches);
     }
 }
 
-fn prune_by_weight(criteria: FindMetaCriteria, mut candidates: Vec<MetaMatch>) {
+fn prune_by_weight(criteria: FindMetaCriteria, candidates: &mut Vec<MetaMatch>) {
     // Weights is a number that gives an idea of how much metadata
     // was actually matched depending on the request input
     // It is not used to give a match score, but rahter to compare candidates within

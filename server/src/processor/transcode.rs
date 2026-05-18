@@ -2,12 +2,19 @@ use crate::config;
 
 // TODO: make these configurable
 const SEGMENT_TIME_SECS: &str = "8";
+const THREADS: &str = "6";
+const DATA_FOLDER: &str = "data/fs/transcodes";
 
 pub fn transcode(path: &str) -> Result<(), std::io::Error> {
     let start = std::time::Instant::now();
 
     let cfg = config::get();
+
+    // todo: support multi resolution quality
     let kbs = cfg.transcode_bitrate_kbs.to_string() + "k";
+
+    let output = String::from(DATA_FOLDER) + "/out_%03d.m4a";
+
     let args: Vec<&str> = [
         // input file
         "-i",
@@ -20,21 +27,25 @@ pub fn transcode(path: &str) -> Result<(), std::io::Error> {
         // reduce logging
         "-loglevel",
         "warning", // [quiet, panic, error, warning, info, verbose, debug, trace]
-        // there may be a video stream containing the album art, keep it!
-        "-c:v",
-        "copy",
+        // no video
+        "-vn",
+        // threads
+        "-threads",
+        THREADS,
         // transcode audio to aac
         "-c:a",
         "aac",
+        // constant bitrate
         "-b:a",
         kbs.as_str(),
         // moovflag must be added to embed metadata on each chunk for streaming
-        "-movflags",
         // faststart = move md to the begining of chunk
         // frag_keyframe = fragment at each keyframe
         // empty_moov = empty header for faster streams
+        "-movflags",
         "+faststart+frag_keyframe+empty_moov+default_base_moof",
-        "data/fs/transcodes/out_%03d.m4a", // todo: smarter split, write into uuid given by db
+        // output
+        output.as_str(), // todo: smarter split, write into uuid given by db
     ]
     .to_vec();
 

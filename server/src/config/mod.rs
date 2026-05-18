@@ -1,4 +1,5 @@
 use log;
+use serde::Deserialize;
 use std::sync::OnceLock;
 use std::{fs::OpenOptions, io::Read, path::Path};
 
@@ -7,6 +8,7 @@ pub struct Config {
     pub transcode_bitrate_kbs: u32, // fmpeg arg for transcode bitrate
     pub transcode_codec: String,    // [aac,mp3,flac,opus,wav,alac]
     pub transcode_enabled: bool,
+    pub duplicates_reimport: bool,
     pub data_dir: String,
 }
 
@@ -16,6 +18,7 @@ impl Default for Config {
             transcode_bitrate_kbs: 192,
             transcode_codec: String::from("aac"),
             transcode_enabled: true,
+            duplicates_reimport: false,
             data_dir: "./data".to_owned(),
         }
     }
@@ -38,16 +41,32 @@ impl Config {
         let n = file.read_to_string(&mut file_str)?;
 
         // file did not exist
-        let cfg: Config;
+        let mut cfg: Config;
         if n == 0 {
             log::info!("{CFG_PATH} is empty, filling defaults");
             cfg = Config::default();
             serde_yaml::to_writer(file, &cfg)?;
         } else {
             cfg = serde_yaml::from_str(file_str.as_str())?;
+            set_missing_defaults(&mut cfg);
         }
 
+        log::info!("loaded config {:?}", cfg);
+
         return Ok(cfg);
+    }
+}
+
+fn set_missing_defaults(cfg: &mut Config) {
+    let def = Config::default();
+    if cfg.transcode_codec == "" {
+        cfg.transcode_codec = def.transcode_codec;
+    }
+    if cfg.transcode_bitrate_kbs == 0 {
+        cfg.transcode_bitrate_kbs = def.transcode_bitrate_kbs;
+    }
+    if cfg.data_dir == "" {
+        cfg.data_dir = def.data_dir;
     }
 }
 

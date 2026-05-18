@@ -14,7 +14,7 @@ pub static CREATE_DB_QUERIES: &[&'static str] = &[
     // "CREATE VIRTUAL TABLE IF NOT EXISTS search_idx USING fts5 (song_name, album_name, artist_name)",
     "CREATE INDEX IF NOT EXISTS idx_song_created ON song(created DESC)",
     "CREATE INDEX IF NOT EXISTS idx_song_album ON song(album_id, track_number)",
-    "CREATE INDEX IF NOT EXISTS idx_duration ON song(duration)",
+    "CREATE INDEX IF NOT EXISTS idx_duration ON song(duration_ms)",
     r#"
         CREATE TABLE IF NOT EXISTS artist (
             id BLOB(16) PRIMARY KEY,
@@ -26,7 +26,7 @@ pub static CREATE_DB_QUERIES: &[&'static str] = &[
         CREATE TABLE IF NOT EXISTS album (
             id BLOB(16) PRIMARY KEY,
             created DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            duration INTEGER NOT NULL,
+            duration_ms INTEGER NOT NULL,
             name VARCHAR(128) NOT NULL
         );
     "#,
