@@ -25,9 +25,12 @@ pub static CREATE_DB_QUERIES: &[&'static str] = &[
     r#"
         CREATE TABLE IF NOT EXISTS album (
             id BLOB(16) PRIMARY KEY,
+            artist_id BLOB(16) NOT NULL,
             created DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            duration_ms INTEGER NOT NULL,
-            name VARCHAR(128) NOT NULL
+            name VARCHAR(128) NOT NULL,
+            release_date DATETIME NOT NULL,
+            track_count INT8 NOT NULL,
+            duration_ms INTEGER NOT NULL
         );
     "#,
     /* #TOKEN #token #SEARCH #search #METADATA #metadata */
@@ -51,6 +54,20 @@ pub static CREATE_DB_QUERIES: &[&'static str] = &[
     "#,
     "CREATE INDEX IF NOT EXISTS idx_song_tokens ON song_token (token)",
     "CREATE INDEX IF NOT EXISTS idx_artist_tokens ON artist_token (token)",
+    /* PLAYBACK playback meta META */
+    // Denomarlize some data for better OLAP
+    r#"
+        CREATE TABLE IF NOT EXISTS playback_log (
+            id BLOB(16) PRIMARY KEY,
+            start DATETIME NOT NULL,
+            end DATETIME NOT NULL,
+            duration_ms INTEGER NOT NULL,
+            song_id BLOB(16) NOT NULL,
+            artist_id BLOB(16),
+            album_id BLOB(16),
+            skipped BOOLEAN
+        )
+    "#,
     /* #USERS #users */
     "CREATE INDEX IF NOT EXISTS idx_album_token ON album_token (token)",
     r#"

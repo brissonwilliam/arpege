@@ -2,7 +2,6 @@ use crate::processor;
 use crate::processor::probe::ProbeData;
 use crate::{config, storage};
 use std::sync::mpsc::{self, Sender};
-use std::thread;
 
 #[derive(Debug)]
 pub struct ProcessorJob {
@@ -71,16 +70,24 @@ impl ProcessorJob {
             matches: matches.len(),
         };
 
+        // If exist and no overrides in config, early exit
         if matches.len() > 0 {
             let cfg = config::get();
             if !cfg.duplicates_reimport {
                 log::info!("{path} already exists in library. Skipping (consider duplicates_reimport config)");
-                return jr
-            } 
+                return jr;
+            }
             log::info!("{path} already exists in library. Will re-importing (consider duplicates_reimport config)")
-        } else {
-            write new entry to db!!!
-            log::info!("Adding {path} to db");
+        }
+
+        // write new entry to db!!!
+        log::info!("Adding {path} to db");
+        match store.write_full_song().await {
+            Ok(_) => (),
+            Err(err) => {
+                log::error!("error writing {path} to db: {:?}", err);
+                return job_result_abort();
+            }
         }
 
         // Transcode (maybe)

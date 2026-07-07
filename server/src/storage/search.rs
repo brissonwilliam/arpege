@@ -1,59 +1,5 @@
-use crate::storage::storage;
+use crate::storage::{norm, storage};
 use sqlx::{FromRow, QueryBuilder, Sqlite};
-
-pub fn normalize_str(s: &str) -> String {
-    let mut norm = String::from(s);
-    norm = norm.to_lowercase();
-    norm = norm.replace(",", "");
-    norm = norm.replace(".", "");
-    norm = norm.replace("-", "");
-    norm = norm.replace(":", "");
-    norm = norm.replace(";", "");
-    norm = norm.replace("/", "");
-    norm = norm.replace("#", "");
-    norm = norm.replace("\\", "");
-    norm = norm.replace("`", "");
-    norm = norm.replace("(", "");
-    norm = norm.replace(")", "");
-    norm = norm.replace("\n", " ");
-    norm = norm.replace("\r", " ");
-    norm = norm.replace("\t", " ");
-    return norm;
-}
-
-pub fn normalize_title(s: &str) -> String {
-    let mut norm = normalize_str(s);
-    norm = norm.replace("feat", "");
-    norm = norm.replace("remastered", "");
-    norm = norm.replace("remaster", "");
-    norm = norm.replace("and", "&");
-    return norm;
-}
-
-pub fn tokenize(s: &String) -> Vec<String> {
-    let mut ret = Vec::new();
-
-    for word in s.split(" ") {
-        if word.len() < 1 {
-            continue;
-        }
-
-        if word.len() <= 2 {
-            let remainder = String::from(&word[0..word.len()]);
-            ret.push(remainder);
-            continue;
-        }
-
-        // push a sliding window of string
-        let mut i = 1;
-        while i + 1 < word.len() {
-            let tok = String::from(&word[i - 1..i + 1]); // +1 because upper bound is excluded
-            ret.push(tok);
-            i += 1;
-        }
-    }
-    return ret;
-}
 
 pub struct FindMetaCriteria {
     pub title: String,
@@ -66,15 +12,15 @@ pub struct FindMetaCriteria {
 
 impl FindMetaCriteria {
     pub fn new(title: String, duration_ms: u32, artists: String, album: String) -> Self {
-        let title_norm = normalize_title(title.as_str());
-        let title_tokens = tokenize(&title_norm); // cannot initialize inline, title_norm would be
-                                                  // borrowed by other field
+        let title_norm = norm::normalize_title(title.as_str());
+        let title_tokens = norm::tokenize(&title_norm); // cannot initialize inline, title_norm would be
+                                                        // borrowed by other field
 
-        let artist_norm = normalize_str(artists.as_str());
-        let artist_tokens = tokenize(&artist_norm);
+        let artist_norm = norm::normalize_str(artists.as_str());
+        let artist_tokens = norm::tokenize(&artist_norm);
 
-        let album_norm = normalize_str(album.as_str());
-        let album_tokens = tokenize(&album_norm);
+        let album_norm = norm::normalize_str(album.as_str());
+        let album_tokens = norm::tokenize(&album_norm);
 
         return FindMetaCriteria {
             title: title_norm,
@@ -103,7 +49,7 @@ impl storage::Storage {
 
         const MAX_INPUT_LEN: usize = 1024;
         search.truncate(MAX_INPUT_LEN);
-        let tokens = tokenize(&search);
+        let tokens = norm::tokenize(&search);
 
         // with t(tok) AS (values('a'), ('b')) select * from t
         let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(

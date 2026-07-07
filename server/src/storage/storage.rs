@@ -1,5 +1,3 @@
-use crate::storage::{duplicata, storage};
-
 use super::myquery;
 use log;
 use sqlx;
@@ -41,15 +39,26 @@ async fn ensure_ready(pool: &sqlx::SqlitePool) -> Result<(), sqlx::Error> {
 #[derive(Debug, Clone)]
 pub struct Storage {
     pub pool: sqlx::Pool<sqlx::Sqlite>,
+    pub insert_behavior: InsertBehavior,
+}
+
+#[derive(Debug, Clone)]
+pub enum InsertBehavior {
+    NoOP,
+    Overwrite,
 }
 
 impl Storage {
     pub fn clone(&self) -> Storage {
         return Storage {
             pool: self.pool.clone(),
+            insert_behavior: self.insert_behavior.clone(),
         };
     }
-    pub fn new(pool: sqlx::Pool<sqlx::Sqlite>) -> Storage {
-        return Storage { pool };
+    pub fn new(pool: sqlx::Pool<sqlx::Sqlite>, ib: InsertBehavior) -> Storage {
+        return Storage {
+            pool: pool,
+            insert_behavior: ib,
+        };
     }
 }
